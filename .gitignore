@@ -15,3 +15,5 @@ data/video-ad/
 test-artifacts/video-ad/
 .local-logs/
 katalk-fact-checker/
+
+.env*

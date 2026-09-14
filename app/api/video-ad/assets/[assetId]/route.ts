@@ -2,6 +2,7 @@ import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { NextResponse } from "next/server";
+import { createCloudReadUrl } from "@/lib/video-ad/cloud-storage";
 import { assetVideoPath, readAsset } from "@/lib/video-ad/storage";
 
 export const runtime = "nodejs";
@@ -27,7 +28,11 @@ const resolveFile = async (context: Context) => {
 
 export async function HEAD(_request: Request, context: Context) {
   const file = await resolveFile(context);
-  if (!file) return new NextResponse(null, { status: 404 });
+  if (!file) {
+    const { assetId } = await context.params;
+    const signedUrl = await createCloudReadUrl("video", assetId).catch(() => null);
+    return signedUrl ? NextResponse.redirect(signedUrl, 307) : new NextResponse(null, { status: 404 });
+  }
   return new NextResponse(null, {
     headers: { ...commonHeaders, "Content-Length": String(file.size) },
   });
@@ -35,7 +40,13 @@ export async function HEAD(_request: Request, context: Context) {
 
 export async function GET(request: Request, context: Context) {
   const file = await resolveFile(context);
-  if (!file) return NextResponse.json({ error: "영상을 찾을 수 없습니다." }, { status: 404 });
+  if (!file) {
+    const { assetId } = await context.params;
+    const signedUrl = await createCloudReadUrl("video", assetId).catch(() => null);
+    return signedUrl
+      ? NextResponse.redirect(signedUrl, 307)
+      : NextResponse.json({ error: "영상을 찾을 수 없습니다." }, { status: 404 });
+  }
 
   const range = request.headers.get("range");
   if (!range) {

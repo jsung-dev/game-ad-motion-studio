@@ -2,6 +2,7 @@ export const OUTPUT_WIDTH = 720;
 export const OUTPUT_HEIGHT = 1280;
 export const OUTPUT_FPS = 30;
 export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+export const CLOUD_MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 export const MAX_VIDEO_SECONDS = 30;
 export const MAX_GRAPHIC_BYTES = 10 * 1024 * 1024;
 

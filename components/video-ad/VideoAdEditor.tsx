@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Player, type PlayerRef } from "@remotion/player";
+import { createClient } from "@supabase/supabase-js";
 import {
   AlertTriangle, Check, CheckCircle2, ChevronDown, Download, Film, ImageIcon,
   Layers3, LoaderCircle, Maximize2, MonitorPlay, Pause, Play, Settings2,
@@ -9,7 +10,7 @@ import {
   UploadCloud, Volume2, VolumeX,
 } from "lucide-react";
 import {
-  createDefaultTextItem, MAX_GRAPHIC_BYTES, MAX_UPLOAD_BYTES, OUTPUT_FPS, OUTPUT_RATIOS,
+  CLOUD_MAX_UPLOAD_BYTES, createDefaultTextItem, MAX_GRAPHIC_BYTES, MAX_UPLOAD_BYTES, OUTPUT_FPS, OUTPUT_RATIOS,
   type AspectMode, type GraphicAsset, type GraphicItem, type MotionPreset, type OutputRatio,
   type RenderJobStatus, type TextItem, type TextPosition, type VideoAsset,
 } from "@/lib/video-ad/types";
@@ -27,6 +28,7 @@ type JobView = {
 };
 
 const LAST_JOB_KEY = "video-ad:last-job";
+const CLOUD_UPLOADS_ENABLED = process.env.NEXT_PUBLIC_VIDEO_STORAGE_MODE === "supabase";
 const motions: Array<{ value: MotionPreset; label: string }> = [
   { value: "none", label: "모션 없음" },
   { value: "pop", label: "팝업" },
@@ -55,8 +57,40 @@ const formatTime = (seconds: number) => {
 
 const responseJson = async <T,>(response: Response): Promise<T> => {
   const body = (await response.json().catch(() => ({}))) as T & { error?: string };
-  if (!response.ok) throw new Error(body.error || "요청을 처리하지 못했습니다.");
+  if (!response.ok) {
+    if (response.status === 413) {
+      throw new Error("배포 서버의 업로드 한도를 넘었습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.");
+    }
+    throw new Error(body.error || "요청을 처리하지 못했습니다.");
+  }
   return body;
+};
+
+const uploadToCloud = async <T,>(kind: "video" | "graphic", file: File): Promise<T> => {
+  const signResponse = await fetch("/api/video-ad/cloud-uploads/sign", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind, fileName: file.name, size: file.size }),
+  });
+  const signed = await responseJson<{ id: string; bucket: string; path: string; token: string }>(signResponse);
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) throw new Error("클라우드 업로드 설정을 확인해 주세요.");
+  const client = createClient(url, key, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+  const contentType = kind === "video" ? "video/mp4" : "image/png";
+  const { error } = await client.storage
+    .from(signed.bucket)
+    .uploadToSignedUrl(signed.path, signed.token, file, { contentType });
+  if (error) throw new Error(`파일 전송에 실패했습니다: ${error.message}`);
+
+  const finalizeResponse = await fetch("/api/video-ad/cloud-uploads/finalize", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind, id: signed.id, originalName: file.name }),
+  });
+  return responseJson<T>(finalizeResponse);
 };
 
 const estimateOverflow = (item: TextItem) => {
@@ -239,17 +273,24 @@ export function VideoAdEditor() {
       setUploadError("현재는 MP4 파일만 지원합니다.");
       return;
     }
-    if (file.size > MAX_UPLOAD_BYTES) {
-      setUploadError("파일 크기는 최대 100MB까지 업로드할 수 있습니다.");
+    const uploadLimit = CLOUD_UPLOADS_ENABLED ? CLOUD_MAX_UPLOAD_BYTES : MAX_UPLOAD_BYTES;
+    if (file.size > uploadLimit) {
+      setUploadError(CLOUD_UPLOADS_ENABLED
+        ? "현재 웹 버전에서는 영상을 최대 50MB까지 업로드할 수 있습니다."
+        : "파일 크기는 최대 100MB까지 업로드할 수 있습니다.");
       return;
     }
 
     setUploading(true);
     try {
-      const form = new FormData();
-      form.append("file", file);
-      const response = await fetch("/api/video-ad/uploads", { method: "POST", body: form });
-      const result = await responseJson<{ asset: VideoAsset }>(response);
+      const result = CLOUD_UPLOADS_ENABLED
+        ? await uploadToCloud<{ asset: VideoAsset }>("video", file)
+        : await (async () => {
+            const form = new FormData();
+            form.append("file", file);
+            const response = await fetch("/api/video-ad/uploads", { method: "POST", body: form });
+            return responseJson<{ asset: VideoAsset }>(response);
+          })();
       setAsset(result.asset);
       setAssetFileSize(file.size);
       setCurrentFrame(0);
@@ -281,10 +322,14 @@ export function VideoAdEditor() {
     }
     setGraphicUploading(true);
     try {
-      const form = new FormData();
-      form.append("file", file);
-      const response = await fetch("/api/video-ad/graphics", { method: "POST", body: form });
-      const result = await responseJson<{ asset: GraphicAsset }>(response);
+      const result = CLOUD_UPLOADS_ENABLED
+        ? await uploadToCloud<{ asset: GraphicAsset }>("graphic", file)
+        : await (async () => {
+            const form = new FormData();
+            form.append("file", file);
+            const response = await fetch("/api/video-ad/graphics", { method: "POST", body: form });
+            return responseJson<{ asset: GraphicAsset }>(response);
+          })();
       const graphic: GraphicItem = {
         id: crypto.randomUUID(),
         graphicId: result.asset.id,

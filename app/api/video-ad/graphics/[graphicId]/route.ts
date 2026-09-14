@@ -2,6 +2,7 @@ import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { NextResponse } from "next/server";
+import { createCloudReadUrl } from "@/lib/video-ad/cloud-storage";
 import { graphicImagePath, readGraphicAsset } from "@/lib/video-ad/storage";
 
 export const runtime = "nodejs";
@@ -12,7 +13,12 @@ type Context = { params: Promise<{ graphicId: string }> };
 export async function GET(_request: Request, context: Context) {
   const { graphicId } = await context.params;
   const asset = await readGraphicAsset(graphicId);
-  if (!asset) return NextResponse.json({ error: "PNG 카피를 찾을 수 없습니다." }, { status: 404 });
+  if (!asset) {
+    const signedUrl = await createCloudReadUrl("graphic", graphicId).catch(() => null);
+    return signedUrl
+      ? NextResponse.redirect(signedUrl, 307)
+      : NextResponse.json({ error: "PNG 카피를 찾을 수 없습니다." }, { status: 404 });
+  }
   const filePath = graphicImagePath(graphicId);
   const info = await stat(filePath).catch(() => null);
   if (!info) return NextResponse.json({ error: "PNG 카피를 찾을 수 없습니다." }, { status: 404 });

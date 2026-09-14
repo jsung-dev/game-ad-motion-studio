@@ -485,7 +485,7 @@ export function VideoAdEditor() {
               <strong>{uploading ? "영상 분석 및 저장 중…" : asset ? "다른 영상으로 교체" : "영상을 드래그하거나 선택"}</strong>
               <span>{asset ? "기존 문구 설정은 그대로 유지됩니다" : "클릭해서 컴퓨터에서 파일 찾기"}</span>
               <span className={styles.formatTags}>
-                <em>MP4</em><em>최대 100MB</em><em>최대 30초</em>
+                <em>MP4</em><em>최대 {CLOUD_UPLOADS_ENABLED ? "50MB" : "100MB"}</em><em>최대 30초</em>
               </span>
             </button>
             {uploadError && <p className={styles.errorBox}>{uploadError}</p>}

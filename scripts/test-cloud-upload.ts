@@ -32,6 +32,7 @@ const main = async () => {
     throw new Error("Supabase 테스트 환경 변수가 필요합니다.");
   }
   if (!ffmpegPath) throw new Error("ffmpeg-static 실행 파일을 찾을 수 없습니다.");
+  const origin = process.env.VIDEO_AD_CLOUD_TEST_ORIGIN?.replace(/\/$/, "");
 
   const directory = await mkdtemp(path.join(tmpdir(), "video-ad-cloud-test-"));
   const samplePath = path.join(directory, "sample.mp4");
@@ -50,11 +51,14 @@ const main = async () => {
       samplePath,
     ]);
     const bytes = await readFile(samplePath);
-    const signResponse = await signUpload(new Request("http://local.test/sign", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind: "video", fileName: "sample.mp4", size: bytes.length }),
-    }));
+    const signRequest = new Request(origin
+      ? `${origin}/api/video-ad/cloud-uploads/sign`
+      : "http://local.test/sign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "video", fileName: "sample.mp4", size: bytes.length }),
+      });
+    const signResponse = origin ? await fetch(signRequest) : await signUpload(signRequest);
     const signed = await json<{ id: string; bucket: string; path: string; token: string }>(signResponse);
     uploaded = { bucket: signed.bucket, path: signed.path };
 
@@ -71,18 +75,25 @@ const main = async () => {
       );
     if (uploadError) throw uploadError;
 
-    const finalizeResponse = await finalizeUpload(new Request("http://local.test/finalize", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind: "video", id: signed.id, originalName: "한글 테스트.mp4" }),
-    }));
+    const finalizeRequest = new Request(origin
+      ? `${origin}/api/video-ad/cloud-uploads/finalize`
+      : "http://local.test/finalize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "video", id: signed.id, originalName: "한글 테스트.mp4" }),
+      });
+    const finalizeResponse = origin
+      ? await fetch(finalizeRequest)
+      : await finalizeUpload(finalizeRequest);
     const finalized = await json<{
       asset: {
         originalName: string;
         metadata: { duration: number; width: number; height: number; fps: number; hasAudio: boolean };
       };
     }>(finalizeResponse);
-    const readUrl = await createCloudReadUrl("video", signed.id, 60);
+    const readUrl = origin
+      ? `${origin}/api/video-ad/assets/${signed.id}`
+      : await createCloudReadUrl("video", signed.id, 60);
     if (!readUrl) throw new Error("미리보기 URL을 만들지 못했습니다.");
     const preview = await fetch(readUrl, { headers: { Range: "bytes=0-1023" } });
     if (preview.status !== 200 && preview.status !== 206) {
@@ -97,6 +108,7 @@ const main = async () => {
     }
     console.log(JSON.stringify({
       uploaded: true,
+      origin: origin ?? "route-direct",
       previewStatus: preview.status,
       originalName: finalized.asset.originalName,
       metadata: finalized.asset.metadata,

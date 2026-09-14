@@ -60,6 +60,12 @@ NEXT_PUBLIC_VIDEO_STORAGE_MODE=supabase
 
 `SUPABASE_SECRET_KEY`는 서버 전용이며 `NEXT_PUBLIC_` 접두사를 붙이면 안 됩니다. 현재 연결된 Supabase 무료 프로젝트의 객체 한도에 맞춰 웹 배포 업로드는 최대 50MB이고, 로컬 업로드는 기존대로 최대 100MB입니다.
 
+배포된 업로드 경로만 실제 점검하려면 위 환경 변수를 셸에 설정한 뒤 다음처럼 실행합니다. 테스트 MP4와 Storage 객체는 점검 직후 자동 삭제됩니다.
+
+```bash
+VIDEO_AD_CLOUD_TEST_ORIGIN=https://game-ad-motion-studio.vercel.app pnpm test:cloud-upload
+```
+
 ## 사용 방법
 
 1. MP4를 선택하거나 드롭합니다. 서버의 ffprobe가 실제 MP4 여부, 업로드 크기 제한, 30초 제한을 확인합니다.

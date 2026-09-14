@@ -1,0 +1,33 @@
+{
+  "name": "game-ad-motion-studio",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "worker": "tsx scripts/render-worker.ts",
+    "worker:once": "tsx scripts/render-worker.ts --once",
+    "cleanup:video-ad": "tsx scripts/cleanup-video-ad.ts",
+    "test:video-ad": "tsx scripts/test-video-ad.ts"
+  },
+  "dependencies": {
+    "@remotion/bundler": "4.0.523",
+    "@remotion/player": "4.0.523",
+    "@remotion/renderer": "4.0.523",
+    "ffmpeg-static": "5.3.0",
+    "ffprobe-static": "3.1.0",
+    "lucide-react": "^1.16.0",
+    "next": "^15.2.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "remotion": "4.0.523"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.8",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "tsx": "4.23.13",
+    "typescript": "^5.7.3"
+  }
+}

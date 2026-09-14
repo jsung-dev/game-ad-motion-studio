@@ -1,6 +1,6 @@
 :root {
-  --font-sans: "Noto Sans KR", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color-scheme: light;
+  --font-sans: "Pretendard Variable", Pretendard, "Noto Sans KR", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color-scheme: dark;
 }
 
 * {
@@ -14,8 +14,8 @@ body {
 }
 
 body {
-  background: #f7f7fb;
-  color: #18181b;
+  background: #080b12;
+  color: #f4f5f8;
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }

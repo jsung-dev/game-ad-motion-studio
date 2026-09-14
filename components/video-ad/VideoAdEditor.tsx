@@ -1,10 +1,12 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Player } from "@remotion/player";
+import { Player, type PlayerRef } from "@remotion/player";
 import {
-  AlertTriangle, CheckCircle2, Download, Film, LoaderCircle, Plus,
-  Sparkles, Trash2, UploadCloud, Volume2, VolumeX,
+  AlertTriangle, Check, CheckCircle2, ChevronDown, Download, Film, ImageIcon,
+  Layers3, LoaderCircle, Maximize2, MonitorPlay, Pause, Play, Settings2,
+  SkipBack, SkipForward, Sparkles, Trash2, Type,
+  UploadCloud, Volume2, VolumeX,
 } from "lucide-react";
 import {
   createDefaultTextItem, MAX_GRAPHIC_BYTES, MAX_UPLOAD_BYTES, OUTPUT_FPS, OUTPUT_RATIOS,
@@ -13,7 +15,7 @@ import {
 } from "@/lib/video-ad/types";
 import { getDurationInFrames, getGraphicItemErrors, getItemErrors, validateEditorPayload } from "@/lib/video-ad/validation";
 import { VideoAdComposition } from "@/remotion/AdComposition";
-import styles from "./VideoAdEditor.module.css";
+import styles from "./VideoAdStudio.module.css";
 
 type JobView = {
   id: string;
@@ -37,6 +39,19 @@ const positions: Array<{ value: TextPosition; label: string }> = [
   { value: "bottom", label: "하단" },
 ];
 const outputRatios: OutputRatio[] = ["1:1", "21:9", "16:9", "4:3", "3:4", "9:16"];
+const timelineTracks = [
+  { key: "video", label: "영상", icon: Film },
+  { key: "image", label: "이미지", icon: ImageIcon },
+  { key: "text", label: "텍스트", icon: Type },
+  { key: "effect", label: "효과", icon: Sparkles },
+] as const;
+
+const formatTime = (seconds: number) => {
+  const safeSeconds = Math.max(0, seconds);
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainder = safeSeconds - minutes * 60;
+  return `${minutes}:${remainder.toFixed(2).padStart(5, "0")}`;
+};
 
 const responseJson = async <T,>(response: Response): Promise<T> => {
   const body = (await response.json().catch(() => ({}))) as T & { error?: string };
@@ -118,7 +133,10 @@ function GraphicPlacementPreview({
 export function VideoAdEditor() {
   const inputRef = useRef<HTMLInputElement>(null);
   const graphicInputRef = useRef<HTMLInputElement>(null);
+  const playerRef = useRef<PlayerRef>(null);
+  const previewSectionRef = useRef<HTMLElement>(null);
   const [asset, setAsset] = useState<VideoAsset | null>(null);
+  const [assetFileSize, setAssetFileSize] = useState<number | null>(null);
   const [items, setItems] = useState<TextItem[]>([]);
   const [graphics, setGraphics] = useState<GraphicItem[]>([]);
   const [aspectMode, setAspectMode] = useState<AspectMode>("cover");
@@ -130,6 +148,9 @@ export function VideoAdEditor() {
   const [graphicError, setGraphicError] = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [job, setJob] = useState<JobView | null>(null);
+  const [currentFrame, setCurrentFrame] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
 
   const duration = asset?.metadata.duration ?? 0;
   const outputDimensions = OUTPUT_RATIOS[outputRatio];
@@ -138,6 +159,17 @@ export function VideoAdEditor() {
     [asset, items, graphics],
   );
   const activeJob = job?.status === "queued" || job?.status === "rendering";
+  const durationInFrames = asset ? getDurationInFrames(asset.metadata.duration) : 1;
+
+  const timelineSegments = useMemo(() => ({
+    video: asset ? [{ id: asset.id, start: 0, end: duration }] : [],
+    image: graphics.map((item) => ({ id: item.id, start: item.start, end: item.end })),
+    text: items.map((item) => ({ id: item.id, start: item.start, end: item.end })),
+    effect: [
+      ...items.filter((item) => item.motion !== "none"),
+      ...graphics.filter((item) => item.motion !== "none"),
+    ].map((item) => ({ id: `effect-${item.id}`, start: item.start, end: item.end })),
+  }), [asset, duration, graphics, items]);
 
   const readJob = useCallback(async (jobId: string) => {
     const response = await fetch(`/api/video-ad/renders/${jobId}`, { cache: "no-store" });
@@ -177,6 +209,30 @@ export function VideoAdEditor() {
     };
   }, [job?.id, job?.status, readJob]);
 
+  useEffect(() => {
+    const player = playerRef.current;
+    if (!player || !asset) return;
+    const onFrameUpdate = (event: { detail: { frame: number } }) => setCurrentFrame(event.detail.frame);
+    const onPlay = () => setIsPlaying(true);
+    const onPause = () => setIsPlaying(false);
+    const onMuteChange = (event: { detail: { isMuted: boolean } }) => setIsMuted(event.detail.isMuted);
+    player.addEventListener("frameupdate", onFrameUpdate);
+    player.addEventListener("play", onPlay);
+    player.addEventListener("pause", onPause);
+    player.addEventListener("ended", onPause);
+    player.addEventListener("mutechange", onMuteChange);
+    setCurrentFrame(player.getCurrentFrame());
+    setIsPlaying(player.isPlaying());
+    setIsMuted(player.isMuted());
+    return () => {
+      player.removeEventListener("frameupdate", onFrameUpdate);
+      player.removeEventListener("play", onPlay);
+      player.removeEventListener("pause", onPause);
+      player.removeEventListener("ended", onPause);
+      player.removeEventListener("mutechange", onMuteChange);
+    };
+  }, [asset, outputRatio]);
+
   const upload = async (file: File) => {
     setUploadError(null);
     if (!file.name.toLowerCase().endsWith(".mp4")) {
@@ -195,6 +251,8 @@ export function VideoAdEditor() {
       const response = await fetch("/api/video-ad/uploads", { method: "POST", body: form });
       const result = await responseJson<{ asset: VideoAsset }>(response);
       setAsset(result.asset);
+      setAssetFileSize(file.size);
+      setCurrentFrame(0);
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : "업로드에 실패했습니다.");
     } finally {
@@ -322,21 +380,35 @@ export function VideoAdEditor() {
   return (
     <main className={styles.page}>
       <header className={styles.header}>
-        <div className={styles.logo}><Film size={21} /> AD MOTION LAB</div>
-        <div>
-          <p className={styles.eyebrow}>첫 번째 테스트 MVP</p>
-          <h1>게임 광고 영상 스튜디오</h1>
-          <p>MP4 위에 문구와 모션을 직접 합성해 원하는 비율의 광고로 출력합니다.</p>
+        <div className={styles.brand}>
+          <span className={styles.brandMark}><Film size={18} /></span>
+          <span className={styles.logo}>AD MOTION LAB</span>
         </div>
-        <div className={styles.outputBadge}>{outputRatio} · {outputDimensions.width} × {outputDimensions.height} · 30fps</div>
+        <div className={styles.projectTitle}>
+          <span className={styles.projectBreadcrumb}>프로젝트</span>
+          <h1>게임 광고 영상 스튜디오</h1>
+        </div>
+        <div className={styles.headerActions}>
+          <span className={styles.saveStatus}><CheckCircle2 size={14} /> 미리보기 자동 반영</span>
+          <button type="button" className={styles.headerButton} onClick={() => previewSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })}>
+            <MonitorPlay size={16} /> 미리보기
+          </button>
+          <button type="button" className={styles.headerPrimary} disabled={!asset || activeJob || editorErrors.length > 0} onClick={() => void startRender()}>
+            {activeJob ? <LoaderCircle className={styles.spin} size={16} /> : <Film size={16} />}
+            내보내기
+          </button>
+        </div>
       </header>
 
       <div className={styles.workspace}>
         <section className={styles.editorColumn}>
           <div className={`${styles.card} ${styles.uploadCard}`}>
-            <div className={styles.sectionTitle}>
-              <span className={styles.step}>1</span>
-              <div><h2>영상 업로드</h2><p>MP4 · 최대 100MB · 최대 30초</p></div>
+            <div className={styles.panelHeader}>
+              <div className={styles.sectionTitle}>
+                <span className={styles.panelIcon}><UploadCloud size={16} /></span>
+                <div><h2>영상 에셋</h2><p>편집할 원본을 추가하세요</p></div>
+              </div>
+              <span className={styles.countBadge}>{asset ? 1 : 0}/1</span>
             </div>
 
             <input
@@ -364,29 +436,44 @@ export function VideoAdEditor() {
                 if (file) void upload(file);
               }}
             >
-              {uploading ? <LoaderCircle className={styles.spin} /> : <UploadCloud />}
-              <strong>{uploading ? "영상 분석 및 저장 중…" : asset ? "다른 영상으로 교체" : "MP4를 놓거나 클릭해서 선택"}</strong>
-              <span>확장자뿐 아니라 ffprobe로 실제 영상 여부를 확인합니다.</span>
+              <span className={styles.uploadIcon}>{uploading ? <LoaderCircle className={styles.spin} /> : <UploadCloud />}</span>
+              <strong>{uploading ? "영상 분석 및 저장 중…" : asset ? "다른 영상으로 교체" : "영상을 드래그하거나 선택"}</strong>
+              <span>{asset ? "기존 문구 설정은 그대로 유지됩니다" : "클릭해서 컴퓨터에서 파일 찾기"}</span>
+              <span className={styles.formatTags}>
+                <em>MP4</em><em>최대 100MB</em><em>최대 30초</em>
+              </span>
             </button>
             {uploadError && <p className={styles.errorBox}>{uploadError}</p>}
             {asset && (
-              <div className={styles.metadata}>
-                <div><span>파일</span><strong title={asset.originalName}>{asset.originalName}</strong></div>
-                <div><span>길이</span><strong>{asset.metadata.duration.toFixed(2)}초</strong></div>
-                <div><span>해상도</span><strong>{asset.metadata.width} × {asset.metadata.height}</strong></div>
-                <div>
-                  <span>오디오</span>
-                  <strong>{asset.metadata.hasAudio ? <><Volume2 size={15} /> 있음</> : <><VolumeX size={15} /> 없음</>}</strong>
+              <div className={styles.assetCard}>
+                <video className={styles.assetThumbnail} src={asset.sourceUrl} muted playsInline preload="metadata" />
+                <div className={styles.assetInfo}>
+                  <strong title={asset.originalName}>{asset.originalName}</strong>
+                  <span>{asset.metadata.duration.toFixed(2)}초 · {asset.metadata.width}×{asset.metadata.height}</span>
+                  <span>{assetFileSize ? `${(assetFileSize / 1024 / 1024).toFixed(1)}MB · ` : ""}{asset.metadata.hasAudio ? "오디오 있음" : "무음 영상"}</span>
                 </div>
+                <button type="button" className={styles.assetRemove} aria-label="업로드 영상 제거" onClick={() => { setAsset(null); setAssetFileSize(null); setCurrentFrame(0); setIsPlaying(false); }}><Trash2 size={15} /></button>
               </div>
             )}
+
+            <div className={styles.assetTools} aria-label="에셋 추가 도구">
+              <button type="button" onClick={() => graphicInputRef.current?.click()} disabled={!asset || graphicUploading || graphics.length >= 10}>
+                {graphicUploading ? <LoaderCircle className={styles.spin} size={17} /> : <ImageIcon size={17} />}<span>PNG 글자</span><small>투명 이미지</small>
+              </button>
+              <button type="button" disabled title="배경 제거 기능은 준비 중입니다">
+                <Sparkles size={17} /><span>배경 제거</span><small>준비 중</small>
+              </button>
+              <button type="button" onClick={addItem} disabled={!asset || items.length >= 20}>
+                <Type size={17} /><span>문구 추가</span><small>텍스트 레이어</small>
+              </button>
+            </div>
           </div>
 
           <div className={`${styles.card} ${styles.copyCard}`}>
             <div className={styles.sectionTitleRow}>
               <div className={styles.sectionTitle}>
-                <span className={styles.step}>2</span>
-                <div><h2>광고 카피 편집</h2><p>문구와 노출 타이밍을 빠르게 설정하세요.</p></div>
+                <span className={styles.panelIcon}><Layers3 size={16} /></span>
+                <div><h2>레이어 편집</h2><p>문구와 PNG의 노출·스타일을 조정하세요</p></div>
               </div>
               <div className={styles.inlineActions}>
                 <input
@@ -399,14 +486,8 @@ export function VideoAdEditor() {
                     if (file) void uploadGraphic(file);
                   }}
                 />
-                <button type="button" onClick={() => graphicInputRef.current?.click()} disabled={!asset || graphicUploading || graphics.length >= 10}>
-                  {graphicUploading ? <LoaderCircle className={styles.spin} size={15} /> : <UploadCloud size={15} />} PNG 글자 추가
-                </button>
                 <button type="button" onClick={addExamples} disabled={!asset || items.length > 17}>
                   <Sparkles size={15} /> 예제 3개 추가
-                </button>
-                <button type="button" onClick={addItem} disabled={!asset || items.length >= 20}>
-                  <Plus size={15} /> 문구 추가
                 </button>
               </div>
             </div>
@@ -511,32 +592,96 @@ export function VideoAdEditor() {
 
         <aside className={styles.previewColumn}>
           <div className={styles.sticky}>
-            <div className={styles.previewHeading}>
-              <div><span className={styles.liveDot} /> 실시간 미리보기</div><span>{outputRatio} · {outputDimensions.width} × {outputDimensions.height}</span>
-            </div>
-            <div className={styles.playerShell} style={{ aspectRatio: `${outputDimensions.width} / ${outputDimensions.height}` }}>
-              {asset ? (
-                <Player
-                  key={`${asset.id}-${outputRatio}`}
-                  component={VideoAdComposition}
-                  inputProps={{ videoSrc: asset.sourceUrl, metadata: asset.metadata, items, graphics, aspectMode, outputRatio }}
-                  durationInFrames={getDurationInFrames(asset.metadata.duration)}
-                  compositionWidth={outputDimensions.width}
-                  compositionHeight={outputDimensions.height}
-                  fps={OUTPUT_FPS}
-                  controls
-                  initiallyShowControls
-                  style={{ width: "100%", height: "100%" }}
-                />
-              ) : (
-                <div className={styles.previewEmpty}><Film size={40} /><span>영상을 업로드하면<br />여기에 표시됩니다.</span></div>
-              )}
-            </div>
+            <section className={styles.canvasPanel} ref={previewSectionRef}>
+              <div className={styles.previewHeading}>
+                <div><span className={styles.liveDot} /> 컴포지션 미리보기</div>
+                <span>{outputDimensions.width} × {outputDimensions.height} · {OUTPUT_FPS}fps</span>
+              </div>
+              <div className={styles.canvasSurface}>
+                <div className={styles.playerShell} style={{ aspectRatio: `${outputDimensions.width} / ${outputDimensions.height}` }}>
+                  {asset ? (
+                    <Player
+                      ref={playerRef}
+                      key={`${asset.id}-${outputRatio}`}
+                      component={VideoAdComposition}
+                      inputProps={{ videoSrc: asset.sourceUrl, metadata: asset.metadata, items, graphics, aspectMode, outputRatio }}
+                      durationInFrames={durationInFrames}
+                      compositionWidth={outputDimensions.width}
+                      compositionHeight={outputDimensions.height}
+                      fps={OUTPUT_FPS}
+                      controls={false}
+                      style={{ width: "100%", height: "100%" }}
+                    />
+                  ) : (
+                    <div className={styles.previewEmpty}>
+                      <span className={styles.emptyPreviewIcon}><MonitorPlay size={34} /></span>
+                      <strong>영상을 업로드하면 미리보기가 시작됩니다</strong>
+                      <span>왼쪽 에셋 패널에 MP4 파일을 추가하세요</span>
+                    </div>
+                  )}
+                </div>
+              </div>
 
-            <div className={styles.renderCard}>
+              <div className={styles.transport}>
+                <span className={styles.timecode}>{formatTime(currentFrame / OUTPUT_FPS)}</span>
+                <div className={styles.transportButtons}>
+                  <button type="button" aria-label="이전 프레임" disabled={!asset} onClick={() => playerRef.current?.seekTo(Math.max(0, currentFrame - 1))}><SkipBack size={16} /></button>
+                  <button type="button" className={styles.playButton} aria-label={isPlaying ? "일시정지" : "재생"} disabled={!asset} onClick={(event) => playerRef.current?.toggle(event)}>{isPlaying ? <Pause size={17} /> : <Play size={17} />}</button>
+                  <button type="button" aria-label="다음 프레임" disabled={!asset} onClick={() => playerRef.current?.seekTo(Math.min(durationInFrames - 1, currentFrame + 1))}><SkipForward size={16} /></button>
+                </div>
+                <div className={styles.transportUtility}>
+                  <button type="button" aria-label={isMuted ? "음소거 해제" : "음소거"} disabled={!asset || !asset.metadata.hasAudio} onClick={() => { const player = playerRef.current; if (!player) return; if (player.isMuted()) player.unmute(); else player.mute(); }}>{isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button>
+                  <button type="button" aria-label="전체 화면" disabled={!asset} onClick={() => playerRef.current?.requestFullscreen()}><Maximize2 size={16} /></button>
+                </div>
+              </div>
+
+              <div className={styles.timelinePanel}>
+                <div className={styles.timelineHeader}>
+                  <div><Layers3 size={15} /><strong>타임라인</strong></div>
+                  <span>{asset ? `${currentFrame + 1} / ${durationInFrames} 프레임` : "레이어가 여기에 표시됩니다"}</span>
+                </div>
+                <div className={styles.timelineRuler}>
+                  <span>0초</span><span>{duration ? `${(duration / 2).toFixed(1)}초` : "—"}</span><span>{duration ? `${duration.toFixed(1)}초` : "—"}</span>
+                </div>
+                <div className={styles.timelineBody}>
+                  {timelineTracks.map(({ key, label, icon: TrackIcon }) => (
+                    <div className={styles.timelineRow} key={key}>
+                      <span className={styles.trackLabel}><TrackIcon size={14} /> {label}</span>
+                      <div className={styles.trackLane}>
+                        {timelineSegments[key].map((segment, index) => (
+                          <span
+                            className={`${styles.timelineClip} ${styles[`timelineClip${key}`]}`}
+                            key={segment.id}
+                            style={{
+                              left: `${duration ? Math.max(0, segment.start / duration * 100) : 0}%`,
+                              width: `${duration ? Math.max(1.5, (segment.end - segment.start) / duration * 100) : 0}%`,
+                            }}
+                          >{key === "video" ? "원본 영상" : `${label} ${index + 1}`}</span>
+                        ))}
+                        {asset && <span className={styles.playhead} style={{ left: `${Math.min(100, currentFrame / Math.max(1, durationInFrames - 1) * 100)}%` }} />}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {asset && (
+                  <input
+                    className={styles.timelineScrubber}
+                    type="range"
+                    aria-label="재생 위치"
+                    min="0"
+                    max={Math.max(0, durationInFrames - 1)}
+                    value={Math.min(currentFrame, durationInFrames - 1)}
+                    onChange={(event) => playerRef.current?.seekTo(event.target.valueAsNumber)}
+                  />
+                )}
+              </div>
+            </section>
+
+            <details className={styles.renderCard} open>
+              <summary className={styles.settingsSummary}><span><Settings2 size={16} /> 출력 설정</span><ChevronDown size={16} /></summary>
               <div className={styles.sectionTitle}>
-                <span className={styles.step}>3</span>
-                <div><h2>영상 비율</h2><p>완성할 영상의 가로·세로 모양을 선택하세요.</p></div>
+                <span className={styles.panelIcon}><Settings2 size={16} /></span>
+                <div><h2>출력 설정</h2><p>최종 영상의 화면과 품질을 정하세요</p></div>
               </div>
               <div className={styles.ratioGrid}>
                 {outputRatios.map((ratio) => {
@@ -546,20 +691,31 @@ export function VideoAdEditor() {
                       <input type="radio" name="ratio" value={ratio} checked={outputRatio === ratio} onChange={() => setOutputRatio(ratio)} />
                       <span className={styles.ratioIcon} style={{ aspectRatio: `${dimensions.width} / ${dimensions.height}` }} />
                       <strong>{ratio}</strong>
+                      {outputRatio === ratio && <Check className={styles.ratioCheck} size={12} />}
                     </label>
                   );
                 })}
               </div>
-              <p className={styles.fitLabel}>원본 영상을 선택한 비율에 맞추는 방법</p>
+              <p className={styles.fitLabel}>편집 모드</p>
               <div className={styles.segmented}>
                 <label className={aspectMode === "cover" ? styles.selected : ""}>
                   <input type="radio" name="fit" value="cover" checked={aspectMode === "cover"} onChange={() => setAspectMode("cover")} />
-                  <strong>화면 꽉 채우기 <em>추천</em></strong><span>빈 공간 없이 채움 · 좌우 일부가 잘릴 수 있음</span>
+                  <span className={styles.fitIcon}><Maximize2 size={15} /></span>
+                  <span><strong>화면 꽉 채우기 <em>추천</em></strong><small>원본을 확대해 여백 없이 출력</small></span>
+                  {aspectMode === "cover" && <Check size={14} />}
                 </label>
                 <label className={aspectMode === "contain" ? styles.selected : ""}>
                   <input type="radio" name="fit" value="contain" checked={aspectMode === "contain"} onChange={() => setAspectMode("contain")} />
-                  <strong>영상 전체 보기</strong><span>잘리지 않음 · 위아래에 검은 여백이 생김</span>
+                  <span className={styles.fitIcon}><MonitorPlay size={15} /></span>
+                  <span><strong>영상 전체 보기</strong><small>원본 전체를 유지하고 여백 허용</small></span>
+                  {aspectMode === "contain" && <Check size={14} />}
                 </label>
+              </div>
+
+              <div className={styles.qualityCard}>
+                <div><span>출력 해상도</span><strong>{outputDimensions.width} × {outputDimensions.height}</strong></div>
+                <div><span>프레임</span><strong>{OUTPUT_FPS} fps</strong></div>
+                <div><span>코덱</span><strong>H.264 · MP4</strong></div>
               </div>
 
               {editorErrors.length > 0 && asset && <p className={styles.validationSummary}><AlertTriangle size={15} /> 수정할 문구 설정이 {editorErrors.length}개 있습니다.</p>}
@@ -582,14 +738,14 @@ export function VideoAdEditor() {
               ) : (
                 <button type="button" className={styles.primaryButton} disabled={!asset || activeJob || editorErrors.length > 0} onClick={() => void startRender()}>
                   {activeJob ? <LoaderCircle className={styles.spin} size={18} /> : <Film size={18} />}
-                  {activeJob ? "영상 만드는 중…" : job?.status === "failed" ? "다시 렌더링" : "최종 영상 만들기"}
+                  <span><strong>{activeJob ? "렌더링 중…" : job?.status === "failed" ? "다시 렌더링" : "렌더링 시작"}</strong><small>로컬 렌더 · 크레딧 0</small></span>
                 </button>
               )}
               {job?.status === "completed" && (
                 <button type="button" className={styles.secondaryButton} onClick={() => void startRender()} disabled={!asset || editorErrors.length > 0}>현재 설정으로 새 영상 만들기</button>
               )}
               <p className={styles.workerHint}>렌더 워커가 켜져 있어야 대기 작업이 처리됩니다: <code>pnpm worker</code></p>
-            </div>
+            </details>
           </div>
         </aside>
       </div>

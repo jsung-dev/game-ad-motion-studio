@@ -118,6 +118,7 @@ export async function POST(request: Request) {
     await writeJob(job);
     return NextResponse.json({ jobId: id, status: job.status }, { status: 202 });
   } catch (error) {
+    console.error("render job creation failed", error);
     const message =
       error instanceof PayloadValidationError
         ? error.message

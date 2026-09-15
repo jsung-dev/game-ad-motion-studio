@@ -3,7 +3,7 @@ import { stat } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { NextResponse } from "next/server";
 import { get } from "@vercel/blob";
-import { readCloudRenderJob } from "@/lib/video-ad/cloud-render";
+import { readCloudRenderJob } from "@/lib/video-ad/cloud-render-state";
 import { jobOutputPath, readJob } from "@/lib/video-ad/storage";
 
 export const runtime = "nodejs";

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { readJob, recoverInterruptedJob } from "@/lib/video-ad/storage";
-import { readCloudRenderJob, refreshCloudRenderJob } from "@/lib/video-ad/cloud-render";
+import { refreshCloudRenderJob } from "@/lib/video-ad/cloud-render";
+import { readCloudRenderJob } from "@/lib/video-ad/cloud-render-state";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

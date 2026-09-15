@@ -5,26 +5,11 @@ import path from "node:path";
 import { bundle } from "@remotion/bundler";
 import { addBundleToSandbox, createSandbox, getRenderProgress, renderMediaOnVercel } from "@remotion/vercel";
 import { Sandbox } from "@vercel/sandbox";
-import { get, put } from "@vercel/blob";
 import { createCloudReadUrl } from "./cloud-storage";
-import { OUTPUT_FPS, type RenderJobStatus, type VideoAdSequenceCompositionProps } from "./types";
+import { OUTPUT_FPS, type VideoAdSequenceCompositionProps } from "./types";
 import type { SequenceRenderClip } from "./server-validation";
 import type { AspectMode, GraphicItem, OutputRatio, TextItem } from "./types";
-
-const JOB_PREFIX = "_render-jobs";
-
-export type CloudRenderJob = {
-  id: string;
-  status: RenderJobStatus;
-  stage: string;
-  progress: number | null;
-  error: string | null;
-  downloadUrl: string | null;
-  sandboxId?: string;
-  cmdId?: string;
-  createdAt: string;
-  updatedAt: string;
-};
+import { writeCloudRenderJob, type CloudRenderJob } from "./cloud-render-state";
 
 type CloudSequenceSettings = {
   clips: SequenceRenderClip[];
@@ -34,37 +19,9 @@ type CloudSequenceSettings = {
   outputRatio: OutputRatio;
 };
 
-const jobPath = (id: string) => `${JOB_PREFIX}/${id}.json`;
-
 export const isCloudRenderEnabled = () => Boolean(
   process.env.VERCEL && process.env.BLOB_READ_WRITE_TOKEN,
 );
-
-export const writeCloudRenderJob = async (job: CloudRenderJob) => {
-  const token = process.env.BLOB_READ_WRITE_TOKEN;
-  if (!token) throw new Error("Vercel Blob 저장소 연결이 필요합니다.");
-  await put(jobPath(job.id), JSON.stringify(job), {
-    access: "private",
-    token,
-    contentType: "application/json",
-    addRandomSuffix: false,
-    allowOverwrite: true,
-    cacheControlMaxAge: 0,
-  });
-};
-
-export const readCloudRenderJob = async (id: string): Promise<CloudRenderJob | null> => {
-  if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
-  const token = process.env.BLOB_READ_WRITE_TOKEN;
-  if (!token) return null;
-  try {
-    const result = await get(jobPath(id), { access: "private", token, useCache: false });
-    if (!result || result.statusCode !== 200) return null;
-    return JSON.parse(await new Response(result.stream).text()) as CloudRenderJob;
-  } catch {
-    return null;
-  }
-};
 
 const stageLabel = (stage: string) => {
   if (stage === "starting") return "렌더링 환경 시작 중";

@@ -639,6 +639,34 @@ export function VideoAdEditor() {
     );
   };
 
+  const updateItemStart = (id: string, nextStart: number) => {
+    if (!Number.isFinite(nextStart) || totalClipDuration <= 0) return;
+    const minimumDuration = 1 / previewFps;
+    setItems((current) => current.map((item) => {
+      if (item.id !== id) return item;
+      const currentDuration = Math.max(minimumDuration, item.end - item.start);
+      const start = Math.max(0, Math.min(nextStart, totalClipDuration - minimumDuration));
+      const end = start >= item.end
+        ? Math.min(totalClipDuration, start + currentDuration)
+        : item.end;
+      return { ...item, start, end: Math.max(start + minimumDuration, end) };
+    }));
+  };
+
+  const updateItemEnd = (id: string, nextEnd: number) => {
+    if (!Number.isFinite(nextEnd) || totalClipDuration <= 0) return;
+    const minimumDuration = 1 / previewFps;
+    setItems((current) => current.map((item) => {
+      if (item.id !== id) return item;
+      const currentDuration = Math.max(minimumDuration, item.end - item.start);
+      const end = Math.max(minimumDuration, Math.min(nextEnd, totalClipDuration));
+      const start = end <= item.start
+        ? Math.max(0, end - currentDuration)
+        : item.start;
+      return { ...item, start: Math.min(start, end - minimumDuration), end };
+    }));
+  };
+
   const addItem = () => {
     if (!clips.length || items.length >= 20) return;
     const item = createDefaultTextItem();
@@ -910,8 +938,8 @@ export function VideoAdEditor() {
                     </label>
 
                     <div className={styles.quickFieldGrid}>
-                      <label><span>시작 (초)</span><input type="number" min="0" max={totalClipDuration} step="0.01" value={item.start} onChange={(event) => updateItem(item.id, "start", event.target.valueAsNumber)} /></label>
-                      <label><span>종료 (초)</span><input type="number" min="0.01" max={totalClipDuration} step="0.01" value={item.end} onChange={(event) => updateItem(item.id, "end", event.target.valueAsNumber)} /></label>
+                      <label><span>시작 (초)</span><input type="number" min="0" max={Math.max(0, totalClipDuration - 1 / previewFps)} step="0.01" value={item.start} onChange={(event) => updateItemStart(item.id, event.target.valueAsNumber)} /></label>
+                      <label><span>종료 (초)</span><input type="number" min={1 / previewFps} max={totalClipDuration} step="0.01" value={item.end} onChange={(event) => updateItemEnd(item.id, event.target.valueAsNumber)} /></label>
                       <label><span>위치</span><select value={item.position} onChange={(event) => updateItem(item.id, "position", event.target.value as TextPosition)}>{positions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
                       <label><span>모션</span><select value={item.motion} onChange={(event) => updateItem(item.id, "motion", event.target.value as MotionPreset)}>{motions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
                     </div>
@@ -930,19 +958,19 @@ export function VideoAdEditor() {
                       </div>
                       <label>
                         <span>시작</span>
-                        <input type="range" min="0" max={totalClipDuration} step="0.01" value={item.start} onChange={(event) => updateItem(item.id, "start", event.target.valueAsNumber)} />
+                        <input type="range" min="0" max={Math.max(0, totalClipDuration - 1 / previewFps)} step="0.01" value={item.start} onChange={(event) => updateItemStart(item.id, event.target.valueAsNumber)} />
                       </label>
                       <label>
                         <span>종료</span>
-                        <input type="range" min="0.01" max={totalClipDuration} step="0.01" value={item.end} onChange={(event) => updateItem(item.id, "end", event.target.valueAsNumber)} />
+                        <input type="range" min={1 / previewFps} max={totalClipDuration} step="0.01" value={item.end} onChange={(event) => updateItemEnd(item.id, event.target.valueAsNumber)} />
                       </label>
                     </div>
 
                     <details className={styles.styleDetails}>
                       <summary>색상 · 크기 · 테두리 · 그림자</summary>
                       <div className={styles.fieldGrid}>
-                      <label><span>시작 시간 (초)</span><input type="number" min="0" max={totalClipDuration} step="0.01" value={item.start} onChange={(event) => updateItem(item.id, "start", event.target.valueAsNumber)} /></label>
-                      <label><span>종료 시간 (초)</span><input type="number" min="0.01" max={totalClipDuration} step="0.01" value={item.end} onChange={(event) => updateItem(item.id, "end", event.target.valueAsNumber)} /></label>
+                      <label><span>시작 시간 (초)</span><input type="number" min="0" max={Math.max(0, totalClipDuration - 1 / previewFps)} step="0.01" value={item.start} onChange={(event) => updateItemStart(item.id, event.target.valueAsNumber)} /></label>
+                      <label><span>종료 시간 (초)</span><input type="number" min={1 / previewFps} max={totalClipDuration} step="0.01" value={item.end} onChange={(event) => updateItemEnd(item.id, event.target.valueAsNumber)} /></label>
                       <label><span>위치</span><select value={item.position} onChange={(event) => updateItem(item.id, "position", event.target.value as TextPosition)}>{positions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
                       <label><span>모션</span><select value={item.motion} onChange={(event) => updateItem(item.id, "motion", event.target.value as MotionPreset)}>{motions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
                       <label><span>글자 크기</span><input type="number" min="24" max="140" value={item.fontSize} onChange={(event) => updateItem(item.id, "fontSize", event.target.valueAsNumber)} /></label>

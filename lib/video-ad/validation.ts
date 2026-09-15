@@ -55,13 +55,14 @@ export const validateEditorPayload = (
   items: TextItem[],
   metadata: VideoMetadata,
   graphics: GraphicItem[] = [],
+  maxVideoSeconds: number | null = MAX_VIDEO_SECONDS,
 ): string[] => {
   const errors: string[] = [];
   if (!Number.isFinite(metadata.duration) || metadata.duration <= 0) {
     errors.push("영상 길이를 읽을 수 없습니다.");
   }
-  if (metadata.duration > MAX_VIDEO_SECONDS + 0.0001) {
-    errors.push(`영상은 최대 ${MAX_VIDEO_SECONDS}초까지 지원합니다.`);
+  if (maxVideoSeconds !== null && metadata.duration > maxVideoSeconds + 0.0001) {
+    errors.push(`영상은 최대 ${maxVideoSeconds}초까지 지원합니다.`);
   }
   if (items.length > 20) errors.push("문구는 최대 20개까지 추가할 수 있습니다.");
   if (graphics.length > 10) errors.push("PNG 카피는 최대 10개까지 추가할 수 있습니다.");

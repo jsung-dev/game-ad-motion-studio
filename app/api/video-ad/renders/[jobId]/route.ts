@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { readJob, recoverInterruptedJob } from "@/lib/video-ad/storage";
+import { readCloudRenderJob, refreshCloudRenderJob } from "@/lib/video-ad/cloud-render";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +11,15 @@ export async function GET(
 ) {
   const { jobId } = await params;
   const stored = await readJob(jobId);
+  if (!stored && process.env.VERCEL) {
+    const cloudStored = await readCloudRenderJob(jobId);
+    if (!cloudStored) return NextResponse.json({ error: "렌더링 작업을 찾을 수 없습니다." }, { status: 404 });
+    const cloudJob = await refreshCloudRenderJob(cloudStored);
+    return NextResponse.json({
+      ...cloudJob,
+      downloadUrl: cloudJob.status === "completed" ? `/api/video-ad/renders/${cloudJob.id}/download` : null,
+    });
+  }
   if (!stored) return NextResponse.json({ error: "렌더링 작업을 찾을 수 없습니다." }, { status: 404 });
   const job = await recoverInterruptedJob(stored);
 

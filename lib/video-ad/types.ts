@@ -114,6 +114,11 @@ export type RenderJob = {
   assetId: string;
   origin: string;
   snapshot: {
+    clips?: Array<{
+      id: string;
+      assetId: string;
+      metadata: VideoMetadata;
+    }>;
     items: TextItem[];
     graphics?: GraphicItem[];
     aspectMode: AspectMode;

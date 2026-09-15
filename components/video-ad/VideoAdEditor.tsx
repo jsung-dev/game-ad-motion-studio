@@ -303,20 +303,6 @@ export function VideoAdEditor() {
   const duration = asset?.metadata.duration ?? 0;
   const selectedClipStartTime = selectedClipStartFrame / previewFps;
   const selectedClipEndTime = selectedClipStartTime + duration;
-  const selectedRenderItems = useMemo(() => items
-    .filter((item) => item.end > selectedClipStartTime && item.start < selectedClipEndTime)
-    .map((item) => ({
-      ...item,
-      start: Math.max(0, item.start - selectedClipStartTime),
-      end: Math.min(duration, item.end - selectedClipStartTime),
-    })), [duration, items, selectedClipEndTime, selectedClipStartTime]);
-  const selectedRenderGraphics = useMemo(() => graphics
-    .filter((item) => item.end > selectedClipStartTime && item.start < selectedClipEndTime)
-    .map((item) => ({
-      ...item,
-      start: Math.max(0, item.start - selectedClipStartTime),
-      end: Math.min(duration, item.end - selectedClipStartTime),
-    })), [duration, graphics, selectedClipEndTime, selectedClipStartTime]);
   const outputDimensions = OUTPUT_RATIOS[outputRatio];
   const editorErrors = useMemo(() => {
     if (!asset) return [];
@@ -886,7 +872,13 @@ export function VideoAdEditor() {
       const response = await fetch("/api/video-ad/renders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assetId: asset.id, items: selectedRenderItems, graphics: selectedRenderGraphics, aspectMode, outputRatio }),
+        body: JSON.stringify({
+          clips: clips.map((clip) => ({ id: clip.id, assetId: clip.asset.id, metadata: clip.asset.metadata })),
+          items,
+          graphics,
+          aspectMode,
+          outputRatio,
+        }),
       });
       const created = await responseJson<{ jobId: string; status: RenderJobStatus }>(response);
       localStorage.setItem(LAST_JOB_KEY, created.jobId);
@@ -921,7 +913,7 @@ export function VideoAdEditor() {
           </button>
           <button type="button" className={styles.headerPrimary} disabled={!asset || activeJob || editorErrors.length > 0} onClick={() => void startRender()}>
             {activeJob ? <LoaderCircle className={styles.spin} size={16} /> : <Film size={16} />}
-            선택 컷 내보내기
+            전체 영상 내보내기
           </button>
         </div>
       </header>
@@ -1408,7 +1400,7 @@ export function VideoAdEditor() {
               <summary className={styles.settingsSummary}><span><Settings2 size={16} /> 출력 설정</span><ChevronDown size={16} /></summary>
               <div className={styles.sectionTitle}>
                 <span className={styles.panelIcon}><Settings2 size={16} /></span>
-                <div><h2>출력 설정</h2><p>현재 선택한 컷의 화면과 품질을 정하세요</p></div>
+                <div><h2>출력 설정</h2><p>모든 컷을 타임라인 순서대로 하나의 영상으로 만듭니다</p></div>
               </div>
               <div className={styles.ratioGrid}>
                 {outputRatios.map((ratio) => {
@@ -1465,7 +1457,7 @@ export function VideoAdEditor() {
               ) : (
                 <button type="button" className={styles.primaryButton} disabled={!asset || activeJob || editorErrors.length > 0} onClick={() => void startRender()}>
                   {activeJob ? <LoaderCircle className={styles.spin} size={18} /> : <Film size={18} />}
-                  <span><strong>{activeJob ? "렌더링 중…" : job?.status === "failed" ? "다시 렌더링" : "선택 컷 렌더링"}</strong><small>기존 렌더 기능 · 크레딧 0</small></span>
+                  <span><strong>{activeJob ? "렌더링 중…" : job?.status === "failed" ? "다시 렌더링" : "전체 영상 렌더링"}</strong><small>{clips.length}개 컷 · 전체 {totalClipDuration.toFixed(2)}초 · 크레딧 0</small></span>
                 </button>
               )}
               {job?.status === "completed" && (

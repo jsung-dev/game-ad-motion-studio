@@ -89,6 +89,34 @@ const render = async (asset: VideoAsset, mode: AspectMode, ratio: OutputRatio, n
   return {output, jobId: created.jobId};
 };
 
+const renderSequence = async (assets: VideoAsset[]) => {
+  const sequenceItems: TextItem[] = [
+    {id: "cross-boundary", text: "첫 컷에서\n두 번째 컷까지", start: 2.4, end: 3.7, position: "center", fontSize: 64, color: "#FFFFFF", strokeColor: "#111827", strokeWidth: 5, shadow: true, motion: "pop"},
+    {id: "sequence-cta", text: "지금 플레이", start: 3.2, end: 5.8, position: "bottom", fontSize: 68, color: "#FFE44D", strokeColor: "#3B0764", strokeWidth: 6, shadow: true, motion: "slide-up"},
+  ];
+  const created = await json<{jobId: string}>("/api/video-ad/renders", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      clips: assets.map((asset, index) => ({id: `sequence-clip-${index}`, assetId: asset.id, metadata: asset.metadata})),
+      items: sequenceItems,
+      graphics: [],
+      aspectMode: "contain",
+      outputRatio: "9:16",
+    }),
+  });
+  if (!(await processNextJob())) throw new Error("sequence worker did not claim a job");
+  const done = await json<{status: string; downloadUrl: string; progress: number}>("/api/video-ad/renders/" + created.jobId);
+  if (done.status !== "completed" || done.progress !== 1 || !done.downloadUrl) {
+    throw new Error("sequence render failed: " + JSON.stringify(done));
+  }
+  const download = await fetch(origin + done.downloadUrl);
+  if (!download.ok) throw new Error("sequence download failed");
+  const output = path.join(artifacts, "output-sequence.mp4");
+  await writeFile(output, new Uint8Array(await download.arrayBuffer()));
+  return {output, jobId: created.jobId};
+};
+
 type Probe = {
   streams: Array<{codec_type: string; codec_name: string; width?: number; height?: number; pix_fmt?: string; r_frame_rate?: string}>;
   format: {duration: string};
@@ -132,11 +160,13 @@ try {
   const baseline = await render(audioAsset, "cover", "9:16", "output-cover-baseline.mp4");
   const cover = await render(audioAsset, "cover", "9:16", "output-cover-audio.mp4", [graphicItem(pngAsset)]);
   const contain = await render(silentAsset, "contain", "16:9", "output-contain-silent.mp4");
+  const sequence = await renderSequence([audioAsset, silentAsset]);
   const {stderr: psnrLog} = await exec(ffmpeg, ["-i", baseline.output, "-i", cover.output, "-lavfi", "psnr", "-f", "null", "NUL"]);
   const psnrAverage = /average:([^ ]+)/.exec(psnrLog)?.[1];
   if (!psnrAverage || psnrAverage === "inf") throw new Error("PNG graphic did not change rendered pixels");
   const coverMeta = await probe(cover.output);
   const containMeta = await probe(contain.output);
+  const sequenceMeta = await probe(sequence.output);
 
   for (const [label, meta, file, expectedWidth, expectedHeight] of [["cover", coverMeta, cover.output, 720, 1280], ["contain", containMeta, contain.output, 1280, 720]] as const) {
     const video = meta.streams.find((stream) => stream.codec_type === "video");
@@ -148,17 +178,28 @@ try {
   }
   if (!coverMeta.streams.some((s) => s.codec_type === "audio" && s.codec_name === "aac")) throw new Error("AAC track was not preserved");
   if (containMeta.streams.some((s) => s.codec_type === "audio")) throw new Error("silent output gained an audio track");
+  const sequenceVideo = sequenceMeta.streams.find((stream) => stream.codec_type === "video");
+  if (!sequenceVideo || sequenceVideo.codec_name !== "h264" || sequenceVideo.width !== 720 || sequenceVideo.height !== 1280 || sequenceVideo.pix_fmt !== "yuv420p") {
+    throw new Error("sequence output spec failed: " + JSON.stringify(sequenceVideo));
+  }
+  if (Math.abs(Number(sequenceMeta.format.duration) - 6) > 1 / 30 + .002) throw new Error("sequence duration is out of tolerance");
+  if (!sequenceMeta.streams.some((s) => s.codec_type === "audio" && s.codec_name === "aac")) throw new Error("sequence AAC track was not preserved");
+  await exec(ffmpeg, ["-v", "error", "-i", sequence.output, "-f", "null", "NUL"]);
 
   const frames = await Promise.all([
     frame(cover.output, "pop-enter", .23), frame(cover.output, "pop-hold", .62), frame(cover.output, "pop-exit", .98),
     frame(cover.output, "slide-enter", 1.08), frame(cover.output, "slide-hold", 1.48), frame(cover.output, "slide-exit", 1.98),
     frame(cover.output, "fade-enter", 2.03), frame(cover.output, "fade-hold", 2.42), frame(cover.output, "fade-exit", 2.82),
     frame(contain.output, "contain-layout", 1.48),
+    frame(sequence.output, "sequence-before-cut", 2.8),
+    frame(sequence.output, "sequence-cut-boundary", 3.0),
+    frame(sequence.output, "sequence-after-cut", 3.35),
+    frame(sequence.output, "sequence-text-exit", 3.62),
   ]);
   const report = {
     passed: true,
     uploads: {audio: audioAsset.metadata, silent: silentAsset.metadata, graphic: pngAsset},
-    outputs: {baseline, cover: {...cover, metadata: coverMeta}, contain: {...contain, metadata: containMeta}, pngPixelDifferencePsnr: psnrAverage},
+    outputs: {baseline, cover: {...cover, metadata: coverMeta}, contain: {...contain, metadata: containMeta}, sequence: {...sequence, metadata: sequenceMeta}, pngPixelDifferencePsnr: psnrAverage},
     frames,
   };
   await writeFile(path.join(artifacts, "report.json"), JSON.stringify(report, null, 2), "utf8");

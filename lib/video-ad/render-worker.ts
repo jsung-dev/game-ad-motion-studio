@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
 import ffmpegPath from "ffmpeg-static";
-import { DEFAULT_OUTPUT_RATIO, type RenderJob, type VideoAdCompositionProps } from "./types";
+import { DEFAULT_OUTPUT_RATIO, OUTPUT_FPS, type RenderJob, type VideoAdCompositionProps, type VideoAdSequenceCompositionProps } from "./types";
 import {
   claimOldestQueuedJob,
   jobOutputPath,
@@ -42,7 +42,23 @@ export const renderClaimedJob = async (job: RenderJob) => {
     if (!asset) throw new Error("업로드한 원본 영상을 찾을 수 없습니다.");
 
     const serveUrl = await getServeUrl(job.id);
-    const inputProps: VideoAdCompositionProps = {
+    const isSequence = Boolean(job.snapshot.clips?.length);
+    const inputProps: VideoAdCompositionProps | VideoAdSequenceCompositionProps = isSequence ? {
+      clips: job.snapshot.clips!.map((clip) => ({
+        id: clip.id,
+        videoSrc: `${job.origin}/api/video-ad/assets/${clip.assetId}`,
+        metadata: clip.metadata,
+        durationInFrames: Math.max(1, Math.round(clip.metadata.duration * OUTPUT_FPS)),
+        graphics: [],
+      })),
+      items: job.snapshot.items,
+      graphics: (job.snapshot.graphics ?? []).map((item) => ({
+        ...item,
+        sourceUrl: `${job.origin}/api/video-ad/graphics/${item.graphicId}`,
+      })),
+      aspectMode: job.snapshot.aspectMode,
+      outputRatio: job.snapshot.outputRatio ?? DEFAULT_OUTPUT_RATIO,
+    } : {
       videoSrc: `${job.origin}/api/video-ad/assets/${job.assetId}`,
       metadata: job.snapshot.metadata,
       items: job.snapshot.items,
@@ -57,7 +73,7 @@ export const renderClaimedJob = async (job: RenderJob) => {
     await updateJob(job.id, { stage: "composition 확인 중", progress: undefined });
     const composition = await selectComposition({
       serveUrl,
-      id: "VideoAd",
+      id: isSequence ? "VideoAdSequence" : "VideoAd",
       inputProps,
       logLevel: "warn",
     });

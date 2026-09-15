@@ -10,7 +10,7 @@
 - Chromium을 실행할 수 있는 환경. Remotion renderer가 첫 렌더에서 호환 브라우저를 준비할 수 있습니다.
 - 시스템 FFmpeg 설치는 필수가 아닙니다. `ffmpeg-static`과 `ffprobe-static`을 프로젝트 의존성으로 사용합니다.
 
-주요 버전은 `remotion`, `@remotion/player`, `@remotion/renderer`, `@remotion/bundler` 모두 `4.0.523`으로 통일했습니다. UI와 서버는 Next.js 15 + TypeScript입니다.
+주요 버전은 `remotion`, `@remotion/player`, `@remotion/renderer`, `@remotion/bundler`, `@remotion/vercel` 모두 `4.0.524`로 통일했습니다. UI와 서버는 Next.js 15 + TypeScript입니다.
 
 ## 설치와 실행
 
@@ -45,10 +45,10 @@ pnpm worker
 - 텍스트·PNG 타임라인 바를 드래그해 이동하고 양끝 핸들로 노출 구간 조절
 - 컷 경계와 다른 텍스트·PNG 시작·종료점에 자동 스냅
 - 미리보기용 HTML5 영상과 전체 컷 사전 로딩으로 컷 전환 대기 최소화
-- 기존 텍스트·PNG·모션·영상 비율·선택 컷 렌더링 기능 유지
+- 기존 텍스트·PNG·모션·영상 비율 기능을 유지한 전체 컷 MP4 렌더링
 - PNG 배치 미리보기에서 위치 이동과 비율 유지 크기 조절
 
-기존 `/cut-editor-test` 주소는 중복 화면을 만들지 않고 메인 스튜디오 `/`로 이동합니다. 현재 렌더 버튼은 선택한 컷 하나를 기존 방식으로 출력하며, 전체 컷을 한 MP4로 결합하는 렌더링은 후속 단계입니다.
+기존 `/cut-editor-test` 주소는 중복 화면을 만들지 않고 메인 스튜디오 `/`로 이동합니다. 렌더 버튼은 현재 타임라인의 모든 컷을 순서대로 붙이고, 전체 시간축의 텍스트와 PNG를 한 MP4에 합성합니다.
 
 프로덕션 모드의 로컬 실행은 다음과 같습니다.
 
@@ -74,9 +74,10 @@ NEXT_PUBLIC_SUPABASE_URL=...
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
 SUPABASE_SECRET_KEY=...
 NEXT_PUBLIC_VIDEO_STORAGE_MODE=supabase
+BLOB_READ_WRITE_TOKEN=...
 ```
 
-`SUPABASE_SECRET_KEY`는 서버 전용이며 `NEXT_PUBLIC_` 접두사를 붙이면 안 됩니다. 현재 연결된 Supabase 무료 프로젝트의 객체 한도에 맞춰 웹 배포 업로드는 최대 50MB이고, 로컬 업로드는 기존대로 최대 100MB입니다.
+`SUPABASE_SECRET_KEY`와 `BLOB_READ_WRITE_TOKEN`은 서버 전용이며 `NEXT_PUBLIC_` 접두사를 붙이면 안 됩니다. Vercel 배포의 최종 렌더는 Vercel Sandbox에서 실행되고 완성 MP4는 비공개 Vercel Blob에 보관됩니다. 브라우저에는 Blob 원본 주소를 노출하지 않고 앱의 다운로드 API가 파일을 전달합니다. 렌더 작업 상태는 기존 Supabase Storage에 저장됩니다. 현재 연결된 Supabase 무료 프로젝트의 객체 한도에 맞춰 웹 배포 업로드는 최대 50MB이고, 로컬 업로드는 기존대로 최대 100MB입니다.
 
 배포된 업로드 경로만 실제 점검하려면 위 환경 변수를 셸에 설정한 뒤 다음처럼 실행합니다. 테스트 MP4와 Storage 객체는 점검 직후 자동 삭제됩니다.
 
@@ -91,7 +92,7 @@ VIDEO_AD_CLOUD_TEST_ORIGIN=https://game-ad-motion-studio.vercel.app pnpm test:cl
 3. Remotion Player에서 재생·일시정지·탐색하며 결과를 확인합니다.
 4. `1:1`, `21:9`, `16:9`, `4:3`, `3:4`, `9:16` 중 영상 비율을 선택합니다.
 5. 원본 영상을 `화면 꽉 채우기` 또는 `영상 전체 보기` 방식으로 맞춥니다.
-6. `최종 영상 만들기`를 누르고 워커가 완료하면 MP4를 다운로드합니다.
+6. `전체 영상 렌더링`을 누르고 완료되면 MP4를 다운로드합니다. 로컬에서는 워커가 처리하고 Vercel에서는 Sandbox가 처리합니다.
 
 렌더 요청 시 문구와 출력 설정의 복사본이 작업 폴더에 저장되므로 렌더 도중 편집한 값은 이미 시작한 결과에 섞이지 않습니다. 마지막 작업 ID는 브라우저 localStorage에 남아 새로고침 후에도 상태를 다시 조회합니다. 죽은 워커의 PID가 확인되면 오래된 `rendering` 작업은 실패로 전환되어 재시도할 수 있습니다.
 
@@ -101,7 +102,7 @@ VIDEO_AD_CLOUD_TEST_ORIGIN=https://game-ad-motion-studio.vercel.app pnpm test:cl
 - 30fps, MP4/H.264, yuv420p
 - 오디오 입력: AAC로 유지
 - 무음 입력: 오디오 트랙 없이 정상 출력
-- 길이: `round(원본 초 × 30)` 프레임. AAC 패딩은 마지막에 무손실 트림합니다.
+- 길이: 각 컷을 `round(원본 초 × 30)` 프레임으로 계산한 합계. 컷 사이에는 빈 프레임을 넣지 않습니다.
 - 텍스트와 투명 PNG 카피는 영상 위에 직접 합성하며, 미리보기와 최종 출력 모두 [`remotion/AdComposition.tsx`](remotion/AdComposition.tsx)를 사용합니다.
 - PNG 카피는 최대 10MB, 가로·세로 4096px까지 지원하며 실제 PNG 시그니처와 IHDR 크기를 검사합니다.
 - Noto Sans KR 900 로컬 서브셋을 미리보기와 렌더러가 함께 사용합니다. 라이선스 전문은 [`licenses/NotoSansKR-OFL.txt`](licenses/NotoSansKR-OFL.txt)에 있습니다.
@@ -124,8 +125,9 @@ pnpm test:video-ad
 - 화면 꽉 채우기 9:16 + 오디오, 영상 전체 보기 16:9 + 무음 출력
 - 720×1280 및 1280×720, 30fps, H.264, yuv420p, AAC, 90프레임 및 재생 가능 여부 확인
 - 등장·유지·퇴장 프레임과 contain 배치 프레임 추출
+- 오디오 3초 컷 + 무음 3초 컷의 6초 연속 출력, 컷 경계 전후 프레임, 경계를 넘어가는 한글 자막 확인
 
-결과는 `test-artifacts/video-ad/report.json`, 출력 MP4 두 개, 추출 PNG에 남습니다. 2026-09-14 로컬 검증에서 두 출력 모두 90프레임으로 디코딩되었고 오디오 결과의 컨테이너 길이는 AAC 패딩을 포함해 3.008초(한 프레임 이내), 무음 결과는 3.000초였습니다.
+결과는 `test-artifacts/video-ad/report.json`, 출력 MP4와 추출 PNG에 남습니다. 2026-09-15 로컬 검증에서 2컷 시퀀스는 180프레임, 720×1280, 30fps, H.264/yuv420p, AAC로 디코딩되었고 컨테이너 길이는 AAC 패딩을 포함해 6.016초(한 프레임 이내)였습니다. 3.0초 컷 경계 전후에서도 한글 자막이 이어지는 프레임을 추출해 확인했습니다.
 
 ## 파일 저장과 정리
 
@@ -149,7 +151,7 @@ pnpm cleanup:video-ad -- --days=7
 ## 현재 제한
 
 - 로컬 렌더링은 단일 사용자·단일 워커 테스트용입니다. 로그인과 결제는 없습니다.
-- Vercel에서는 영상·PNG 입력을 Supabase Storage에 보관하고 미리보기까지 지원합니다. 클라우드 최종 렌더링은 Remotion Lambda 연결 전이므로 아직 로컬 워커를 사용해야 합니다.
+- Vercel 최종 렌더에는 프로젝트에 연결된 Vercel Blob 저장소와 `BLOB_READ_WRITE_TOKEN`이 필요합니다. 저장소가 없으면 버튼에 설정 오류가 표시됩니다.
 - 웹 배포 영상 업로드 한도는 현재 Supabase 프로젝트 제한에 맞춘 50MB이며, 로컬은 100MB입니다.
-- 웹 서버와 렌더 워커를 함께 실행해야 합니다. 워커가 꺼져 있으면 작업은 `대기` 상태로 유지됩니다.
+- 로컬에서는 웹 서버와 렌더 워커를 함께 실행해야 합니다. 워커가 꺼져 있으면 작업은 `대기` 상태로 유지됩니다.
 - 텍스트 넘침 안내는 안전 영역 기준 추정치이며 최종 판단은 같은 composition을 사용하는 미리보기에서 확인합니다.

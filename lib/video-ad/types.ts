@@ -93,12 +93,12 @@ export type VideoAdSequenceClip = {
   videoSrc: string;
   metadata: VideoMetadata;
   durationInFrames: number;
-  items: TextItem[];
   graphics: GraphicItem[];
 };
 
 export type VideoAdSequenceCompositionProps = {
   clips: VideoAdSequenceClip[];
+  items: TextItem[];
   aspectMode: AspectMode;
   outputRatio: OutputRatio;
 };

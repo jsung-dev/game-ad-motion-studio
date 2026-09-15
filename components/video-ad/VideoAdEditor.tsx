@@ -33,7 +33,6 @@ type EditorClip = {
   fileSize: number;
   prompt: string;
   version: number;
-  items: TextItem[];
   graphics: GraphicItem[];
 };
 
@@ -222,6 +221,7 @@ export function VideoAdEditor() {
   const previewSectionRef = useRef<HTMLElement>(null);
   const [clips, setClips] = useState<EditorClip[]>([]);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  const [items, setItems] = useState<TextItem[]>([]);
   const [aspectMode, setAspectMode] = useState<AspectMode>("cover");
   const [outputRatio, setOutputRatio] = useState<OutputRatio>("9:16");
   const [uploading, setUploading] = useState(false);
@@ -238,7 +238,6 @@ export function VideoAdEditor() {
   const selectedClip = clips.find((clip) => clip.id === selectedClipId) ?? null;
   const asset = selectedClip?.asset ?? null;
   const assetFileSize = selectedClip?.fileSize ?? null;
-  const items = selectedClip?.items ?? [];
   const graphics = selectedClip?.graphics ?? [];
   const selectedClipIndex = selectedClip
     ? clips.findIndex((clip) => clip.id === selectedClip.id)
@@ -266,35 +265,24 @@ export function VideoAdEditor() {
   const totalClipDuration = clips.length ? sequenceDurationInFrames / previewFps : 0;
   const hasSequenceAudio = clips.some((clip) => clip.asset.metadata.hasAudio);
   const selectedClipStartFrame = selectedClipIndex >= 0 ? clipStartFrames[selectedClipIndex] ?? 0 : 0;
-  const selectedDurationInFrames = selectedClipIndex >= 0 ? clipFrameCounts[selectedClipIndex] ?? 1 : 1;
-  const localCurrentFrame = Math.max(0, Math.min(selectedDurationInFrames - 1, currentFrame - selectedClipStartFrame));
   const sequenceCurrentTime = currentFrame / previewFps;
   const previewClips = useMemo<VideoAdSequenceClip[]>(() => clips.map((clip, index) => ({
     id: clip.id,
     videoSrc: clip.asset.sourceUrl,
     metadata: clip.asset.metadata,
     durationInFrames: clipFrameCounts[index],
-    items: clip.items,
     graphics: clip.graphics,
   })), [clipFrameCounts, clips]);
   const previewInputProps = useMemo(() => ({
     clips: previewClips,
+    items,
     aspectMode,
     outputRatio,
-  }), [aspectMode, outputRatio, previewClips]);
+  }), [aspectMode, items, outputRatio, previewClips]);
   const sequencePlayerKey = useMemo(
     () => `${outputRatio}:${previewFps}:${clips.map((clip) => `${clip.id}:${clip.asset.id}`).join("|")}`,
     [clips, outputRatio, previewFps],
   );
-
-  const setItems = useCallback((action: React.SetStateAction<TextItem[]>) => {
-    if (!selectedClipId) return;
-    setClips((current) => current.map((clip) => {
-      if (clip.id !== selectedClipId) return clip;
-      const next = typeof action === "function" ? action(clip.items) : action;
-      return { ...clip, items: next };
-    }));
-  }, [selectedClipId]);
 
   const setGraphics = useCallback((action: React.SetStateAction<GraphicItem[]>) => {
     if (!selectedClipId) return;
@@ -306,22 +294,63 @@ export function VideoAdEditor() {
   }, [selectedClipId]);
 
   const duration = asset?.metadata.duration ?? 0;
+  const selectedClipStartTime = selectedClipStartFrame / previewFps;
+  const selectedClipEndTime = selectedClipStartTime + duration;
+  const selectedRenderItems = useMemo(() => items
+    .filter((item) => item.end > selectedClipStartTime && item.start < selectedClipEndTime)
+    .map((item) => ({
+      ...item,
+      start: Math.max(0, item.start - selectedClipStartTime),
+      end: Math.min(duration, item.end - selectedClipStartTime),
+    })), [duration, items, selectedClipEndTime, selectedClipStartTime]);
   const outputDimensions = OUTPUT_RATIOS[outputRatio];
-  const editorErrors = useMemo(
-    () => (asset ? validateEditorPayload(items, asset.metadata, graphics) : []),
-    [asset, items, graphics],
-  );
+  const editorErrors = useMemo(() => {
+    if (!asset) return [];
+    const errors = validateEditorPayload([], asset.metadata, graphics);
+    if (items.length > 20) errors.push("문구는 최대 20개까지 추가할 수 있습니다.");
+    items.forEach((item, index) => {
+      getItemErrors(item, totalClipDuration).forEach((error) => {
+        errors.push(`${index + 1}번 문구: ${error}`);
+      });
+    });
+    return errors;
+  }, [asset, graphics, items, totalClipDuration]);
   const activeJob = job?.status === "queued" || job?.status === "rendering";
 
-  const timelineSegments = useMemo(() => ({
-    video: asset ? [{ id: asset.id, start: 0, end: duration }] : [],
-    image: graphics.map((item) => ({ id: item.id, start: item.start, end: item.end })),
-    text: items.map((item) => ({ id: item.id, start: item.start, end: item.end })),
-    effect: [
-      ...items.filter((item) => item.motion !== "none"),
-      ...graphics.filter((item) => item.motion !== "none"),
-    ].map((item) => ({ id: `effect-${item.id}`, start: item.start, end: item.end })),
-  }), [asset, duration, graphics, items]);
+  const timelineSegments = useMemo(() => {
+    const video: Array<{ id: string; start: number; end: number }> = [];
+    const image: Array<{ id: string; start: number; end: number }> = [];
+    const graphicEffects: Array<{ id: string; start: number; end: number }> = [];
+    clips.forEach((clip, clipIndex) => {
+      const clipStart = (clipStartFrames[clipIndex] ?? 0) / previewFps;
+      const clipEnd = clipStart + (clipFrameCounts[clipIndex] ?? 1) / previewFps;
+      video.push({ id: clip.id, start: clipStart, end: clipEnd });
+      clip.graphics.forEach((graphic) => {
+        image.push({
+          id: graphic.id,
+          start: clipStart + graphic.start,
+          end: clipStart + graphic.end,
+        });
+        if (graphic.motion !== "none") {
+          graphicEffects.push({
+            id: `effect-${graphic.id}`,
+            start: clipStart + graphic.start,
+            end: clipStart + graphic.end,
+          });
+        }
+      });
+    });
+    return {
+      video,
+      image,
+      text: items.map((item) => ({ id: item.id, start: item.start, end: item.end })),
+      effect: [
+        ...items.filter((item) => item.motion !== "none")
+          .map((item) => ({ id: `effect-${item.id}`, start: item.start, end: item.end })),
+        ...graphicEffects,
+      ],
+    };
+  }, [clipFrameCounts, clipStartFrames, clips, items, previewFps]);
 
   const readJob = useCallback(async (jobId: string) => {
     const response = await fetch(`/api/video-ad/renders/${jobId}`, { cache: "no-store" });
@@ -453,7 +482,6 @@ export function VideoAdEditor() {
           fileSize: file.size,
           prompt: "",
           version: 1,
-          items: [],
           graphics: [],
         });
       }
@@ -612,15 +640,15 @@ export function VideoAdEditor() {
   };
 
   const addItem = () => {
-    if (!asset || items.length >= 20) return;
+    if (!clips.length || items.length >= 20) return;
     const item = createDefaultTextItem();
-    item.end = Math.min(duration, 2.5);
+    item.end = Math.min(totalClipDuration, 2.5);
     setItems((current) => [...current, item]);
   };
 
   const addExamples = () => {
-    if (!asset || items.length > 17) return;
-    const segment = duration / 3;
+    if (!clips.length || items.length > 17) return;
+    const segment = totalClipDuration / 3;
     const examples: Array<Pick<TextItem, "text" | "position" | "motion">> = [
       { text: "지금 시작하면", position: "top", motion: "pop" },
       { text: "100연 뽑기 무료!", position: "center", motion: "slide-up" },
@@ -632,7 +660,7 @@ export function VideoAdEditor() {
         ...createDefaultTextItem(),
         ...example,
         start: Number((segment * index).toFixed(3)),
-        end: Number((index === 2 ? duration : segment * (index + 1)).toFixed(3)),
+        end: Number((index === 2 ? totalClipDuration : segment * (index + 1)).toFixed(3)),
       })),
     ]);
   };
@@ -640,9 +668,8 @@ export function VideoAdEditor() {
   const startRender = async () => {
     if (!asset || activeJob) return;
     setRenderError(null);
-    const errors = validateEditorPayload(items, asset.metadata, graphics);
-    if (errors.length) {
-      setRenderError(errors.join("\n"));
+    if (editorErrors.length) {
+      setRenderError(editorErrors.join("\n"));
       return;
     }
 
@@ -650,7 +677,7 @@ export function VideoAdEditor() {
       const response = await fetch("/api/video-ad/renders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assetId: asset.id, items, graphics, aspectMode, outputRatio }),
+        body: JSON.stringify({ assetId: asset.id, items: selectedRenderItems, graphics, aspectMode, outputRatio }),
       });
       const created = await responseJson<{ jobId: string; status: RenderJobStatus }>(response);
       localStorage.setItem(LAST_JOB_KEY, created.jobId);
@@ -772,8 +799,12 @@ export function VideoAdEditor() {
                   </button>
                 </div>
                 <div className={styles.clipManagerList}>
-                  {clips.map((clip, index) => (
-                    <article
+                  {clips.map((clip, index) => {
+                    const clipStart = (clipStartFrames[index] ?? 0) / previewFps;
+                    const clipEnd = clipStart + (clipFrameCounts[index] ?? 1) / previewFps;
+                    const textLayerCount = items.filter((item) => item.end > clipStart && item.start < clipEnd).length;
+                    return (
+                      <article
                       key={clip.id}
                       className={clip.id === selectedClipId ? styles.selectedClipCard : ""}
                       onClick={() => selectClip(clip.id)}
@@ -786,15 +817,16 @@ export function VideoAdEditor() {
                       <span className={styles.clipNumber}>{index + 1}</span>
                       <div>
                         <strong title={clip.asset.originalName}>{clip.asset.originalName}</strong>
-                        <small>{clip.asset.metadata.duration.toFixed(2)}초 · {clip.asset.metadata.fps.toFixed(1)}fps · 레이어 {clip.items.length + clip.graphics.length}개</small>
+                        <small>{clip.asset.metadata.duration.toFixed(2)}초 · {clip.asset.metadata.fps.toFixed(1)}fps · 레이어 {textLayerCount + clip.graphics.length}개</small>
                       </div>
                       <div className={styles.clipCardActions}>
                         <button type="button" title="앞으로 이동" disabled={index === 0} onClick={(event) => { event.stopPropagation(); moveClip(clip.id, -1); }}><ChevronLeft size={13} /></button>
                         <button type="button" title="뒤로 이동" disabled={index === clips.length - 1} onClick={(event) => { event.stopPropagation(); moveClip(clip.id, 1); }}><ChevronRight size={13} /></button>
                         <button type="button" title="이 컷만 새 MP4로 교체" onClick={(event) => { event.stopPropagation(); replaceTargetRef.current = clip.id; replaceInputRef.current?.click(); }}><RefreshCw size={12} /></button>
                       </div>
-                    </article>
-                  ))}
+                      </article>
+                    );
+                  })}
                 </div>
                 {selectedClip && (
                   <label className={styles.clipPrompt}>
@@ -819,8 +851,8 @@ export function VideoAdEditor() {
               <button type="button" disabled title="배경 제거 기능은 준비 중입니다">
                 <Sparkles size={17} /><span>배경 제거</span><small>준비 중</small>
               </button>
-              <button type="button" onClick={addItem} disabled={!asset || items.length >= 20}>
-                <Type size={17} /><span>문구 추가</span><small>텍스트 레이어</small>
+              <button type="button" onClick={addItem} disabled={!clips.length || items.length >= 20}>
+                <Type size={17} /><span>문구 추가</span><small>전체 타임라인</small>
               </button>
             </div>
           </div>
@@ -829,7 +861,7 @@ export function VideoAdEditor() {
             <div className={styles.sectionTitleRow}>
               <div className={styles.sectionTitle}>
                 <span className={styles.panelIcon}><Layers3 size={16} /></span>
-                <div><h2>레이어 편집</h2><p>문구와 PNG의 노출·스타일을 조정하세요</p></div>
+                <div><h2>레이어 편집</h2><p>텍스트는 전체 시간, PNG는 선택 컷 기준입니다</p></div>
               </div>
               <div className={styles.inlineActions}>
                 <input
@@ -842,12 +874,18 @@ export function VideoAdEditor() {
                     if (file) void uploadGraphic(file);
                   }}
                 />
-                <button type="button" onClick={addExamples} disabled={!asset || items.length > 17}>
+                <button type="button" onClick={addExamples} disabled={!clips.length || items.length > 17}>
                   <Sparkles size={15} /> 예제 3개 추가
                 </button>
               </div>
             </div>
 
+            {clips.length > 0 && (
+              <div className={styles.timelineScopeNotice}>
+                <strong>전체 타임라인 0초–{totalClipDuration.toFixed(2)}초</strong>
+                <span>텍스트는 컷 경계를 넘어 표시할 수 있습니다. 예: 3초–{totalClipDuration.toFixed(2)}초</span>
+              </div>
+            )}
             {!asset && <div className={styles.empty}>먼저 영상을 업로드하면 문구를 편집할 수 있습니다.</div>}
             {asset && items.length === 0 && graphics.length === 0 && <div className={styles.empty}>문구를 입력하거나 투명 PNG 글자를 추가해 보세요.</div>}
 
@@ -855,7 +893,7 @@ export function VideoAdEditor() {
 
             <div className={styles.itemList}>
               {items.map((item, index) => {
-                const errors = getItemErrors(item, duration);
+                const errors = getItemErrors(item, totalClipDuration);
                 const overflow = estimateOverflow(item);
                 return (
                   <article className={`${styles.textCard} ${errors.length ? styles.invalid : ""}`} key={item.id}>
@@ -872,17 +910,39 @@ export function VideoAdEditor() {
                     </label>
 
                     <div className={styles.quickFieldGrid}>
-                      <label><span>시작 (초)</span><input type="number" min="0" step="0.01" value={item.start} onChange={(event) => updateItem(item.id, "start", event.target.valueAsNumber)} /></label>
-                      <label><span>종료 (초)</span><input type="number" min="0.01" step="0.01" value={item.end} onChange={(event) => updateItem(item.id, "end", event.target.valueAsNumber)} /></label>
+                      <label><span>시작 (초)</span><input type="number" min="0" max={totalClipDuration} step="0.01" value={item.start} onChange={(event) => updateItem(item.id, "start", event.target.valueAsNumber)} /></label>
+                      <label><span>종료 (초)</span><input type="number" min="0.01" max={totalClipDuration} step="0.01" value={item.end} onChange={(event) => updateItem(item.id, "end", event.target.valueAsNumber)} /></label>
                       <label><span>위치</span><select value={item.position} onChange={(event) => updateItem(item.id, "position", event.target.value as TextPosition)}>{positions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
                       <label><span>모션</span><select value={item.motion} onChange={(event) => updateItem(item.id, "motion", event.target.value as MotionPreset)}>{motions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+                    </div>
+                    <div className={styles.globalRangeEditor}>
+                      <div className={styles.globalRangeHeader}>
+                        <strong>전체 노출 구간</strong>
+                        <span>{item.start.toFixed(2)}초 → {item.end.toFixed(2)}초 / 총 {totalClipDuration.toFixed(2)}초</span>
+                      </div>
+                      <div className={styles.globalRangeTrack} aria-hidden="true">
+                        <span
+                          style={{
+                            left: `${totalClipDuration ? item.start / totalClipDuration * 100 : 0}%`,
+                            width: `${totalClipDuration ? Math.max(0, item.end - item.start) / totalClipDuration * 100 : 0}%`,
+                          }}
+                        />
+                      </div>
+                      <label>
+                        <span>시작</span>
+                        <input type="range" min="0" max={totalClipDuration} step="0.01" value={item.start} onChange={(event) => updateItem(item.id, "start", event.target.valueAsNumber)} />
+                      </label>
+                      <label>
+                        <span>종료</span>
+                        <input type="range" min="0.01" max={totalClipDuration} step="0.01" value={item.end} onChange={(event) => updateItem(item.id, "end", event.target.valueAsNumber)} />
+                      </label>
                     </div>
 
                     <details className={styles.styleDetails}>
                       <summary>색상 · 크기 · 테두리 · 그림자</summary>
                       <div className={styles.fieldGrid}>
-                      <label><span>시작 시간 (초)</span><input type="number" min="0" step="0.01" value={item.start} onChange={(event) => updateItem(item.id, "start", event.target.valueAsNumber)} /></label>
-                      <label><span>종료 시간 (초)</span><input type="number" min="0.01" step="0.01" value={item.end} onChange={(event) => updateItem(item.id, "end", event.target.valueAsNumber)} /></label>
+                      <label><span>시작 시간 (초)</span><input type="number" min="0" max={totalClipDuration} step="0.01" value={item.start} onChange={(event) => updateItem(item.id, "start", event.target.valueAsNumber)} /></label>
+                      <label><span>종료 시간 (초)</span><input type="number" min="0.01" max={totalClipDuration} step="0.01" value={item.end} onChange={(event) => updateItem(item.id, "end", event.target.valueAsNumber)} /></label>
                       <label><span>위치</span><select value={item.position} onChange={(event) => updateItem(item.id, "position", event.target.value as TextPosition)}>{positions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
                       <label><span>모션</span><select value={item.motion} onChange={(event) => updateItem(item.id, "motion", event.target.value as MotionPreset)}>{motions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
                       <label><span>글자 크기</span><input type="number" min="24" max="140" value={item.fontSize} onChange={(event) => updateItem(item.id, "fontSize", event.target.valueAsNumber)} /></label>
@@ -1036,12 +1096,12 @@ export function VideoAdEditor() {
                             className={`${styles.timelineClip} ${styles[`timelineClip${key}`]}`}
                             key={segment.id}
                             style={{
-                              left: `${duration ? Math.max(0, segment.start / duration * 100) : 0}%`,
-                              width: `${duration ? Math.max(1.5, (segment.end - segment.start) / duration * 100) : 0}%`,
+                              left: `${totalClipDuration ? Math.max(0, segment.start / totalClipDuration * 100) : 0}%`,
+                              width: `${totalClipDuration ? Math.max(1.5, (segment.end - segment.start) / totalClipDuration * 100) : 0}%`,
                             }}
                           >{key === "video" ? "원본 영상" : `${label} ${index + 1}`}</span>
                         ))}
-                        {asset && <span className={styles.playhead} style={{ left: `${Math.min(100, localCurrentFrame / Math.max(1, selectedDurationInFrames - 1) * 100)}%` }} />}
+                        {asset && <span className={styles.playhead} style={{ left: `${Math.min(100, currentFrame / Math.max(1, sequenceDurationInFrames - 1) * 100)}%` }} />}
                       </div>
                     </div>
                   ))}

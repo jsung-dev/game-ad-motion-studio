@@ -184,6 +184,17 @@
 .inlineActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
 .inlineActions button, .secondaryButton { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid #343b4d; border-radius: 9px; padding: 8px 10px; color: #c8cddd; background: #191e29; font-size: 9px; font-weight: 700; cursor: pointer; transition: .16s ease; }
 .inlineActions button:hover:not(:disabled), .secondaryButton:hover:not(:disabled) { border-color: #6256a5; color: #e6e0ff; transform: translateY(-1px); }
+.timelineScopeNotice { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; border: 1px solid #443d70; border-radius: 9px; padding: 9px 10px; color: #aeb6c8; background: #19172a; }
+.timelineScopeNotice strong { color: #ddd7ff; font-size: 9px; }
+.timelineScopeNotice span { color: #858da0; font-size: 8px; line-height: 1.45; }
+.globalRangeEditor { display: flex; flex-direction: column; gap: 7px; border: 1px solid #30364a; border-radius: 9px; padding: 9px; background: #10141d; }
+.globalRangeHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.globalRangeHeader strong { color: #c9c2f8; font-size: 8px; }
+.globalRangeHeader span { color: #818a9e; font-size: 7px; text-align: right; }
+.globalRangeTrack { position: relative; height: 8px; overflow: hidden; border-radius: 999px; background: #282e3b; }
+.globalRangeTrack > span { position: absolute; top: 0; bottom: 0; min-width: 2px; border-radius: inherit; background: linear-gradient(90deg, #745bea, #4e86ed); }
+.globalRangeEditor label { display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 7px; color: #7e879a; font-size: 7px; }
+.globalRangeEditor input[type="range"] { width: 100%; accent-color: #7864e9; }
 .inlineActions button:disabled, .secondaryButton:disabled { color: #5d6475; cursor: not-allowed; }
 .itemList { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
 .empty { grid-column: 1 / -1; margin-top: 14px; border: 1px dashed #303747; border-radius: 11px; background: #0d1119; padding: 28px 16px; text-align: center; color: #727b8f; font-size: 10px; }

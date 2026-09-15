@@ -639,32 +639,54 @@ export function VideoAdEditor() {
     );
   };
 
+  const seekToTextPreview = (start: number, end: number) => {
+    const minimumDuration = 1 / previewFps;
+    const previewOffset = Math.min(0.35, Math.max(minimumDuration, (end - start) / 2));
+    const previewTime = Math.min(end - minimumDuration, start + previewOffset);
+    const frame = Math.max(0, Math.min(
+      sequenceDurationInFrames - 1,
+      Math.round(previewTime * previewFps),
+    ));
+    currentFrameRef.current = frame;
+    setCurrentFrame(frame);
+    requestAnimationFrame(() => {
+      playerRef.current?.pause();
+      playerRef.current?.seekTo(frame);
+    });
+  };
+
   const updateItemStart = (id: string, nextStart: number) => {
     if (!Number.isFinite(nextStart) || totalClipDuration <= 0) return;
+    const item = items.find((entry) => entry.id === id);
+    if (!item) return;
     const minimumDuration = 1 / previewFps;
-    setItems((current) => current.map((item) => {
-      if (item.id !== id) return item;
-      const currentDuration = Math.max(minimumDuration, item.end - item.start);
-      const start = Math.max(0, Math.min(nextStart, totalClipDuration - minimumDuration));
-      const end = start >= item.end
-        ? Math.min(totalClipDuration, start + currentDuration)
-        : item.end;
-      return { ...item, start, end: Math.max(start + minimumDuration, end) };
-    }));
+    const currentDuration = Math.max(minimumDuration, item.end - item.start);
+    const start = Math.max(0, Math.min(nextStart, totalClipDuration - minimumDuration));
+    const adjustedEnd = start >= item.end
+      ? Math.min(totalClipDuration, start + currentDuration)
+      : item.end;
+    const end = Math.max(start + minimumDuration, adjustedEnd);
+    setItems((current) => current.map((entry) => (
+      entry.id === id ? { ...entry, start, end } : entry
+    )));
+    seekToTextPreview(start, end);
   };
 
   const updateItemEnd = (id: string, nextEnd: number) => {
     if (!Number.isFinite(nextEnd) || totalClipDuration <= 0) return;
+    const item = items.find((entry) => entry.id === id);
+    if (!item) return;
     const minimumDuration = 1 / previewFps;
-    setItems((current) => current.map((item) => {
-      if (item.id !== id) return item;
-      const currentDuration = Math.max(minimumDuration, item.end - item.start);
-      const end = Math.max(minimumDuration, Math.min(nextEnd, totalClipDuration));
-      const start = end <= item.start
-        ? Math.max(0, end - currentDuration)
-        : item.start;
-      return { ...item, start: Math.min(start, end - minimumDuration), end };
-    }));
+    const currentDuration = Math.max(minimumDuration, item.end - item.start);
+    const end = Math.max(minimumDuration, Math.min(nextEnd, totalClipDuration));
+    const adjustedStart = end <= item.start
+      ? Math.max(0, end - currentDuration)
+      : item.start;
+    const start = Math.min(adjustedStart, end - minimumDuration);
+    setItems((current) => current.map((entry) => (
+      entry.id === id ? { ...entry, start, end } : entry
+    )));
+    seekToTextPreview(start, end);
   };
 
   const addItem = () => {

@@ -94,7 +94,7 @@ export const startCloudSequenceRender = async (settings: CloudSequenceSettings) 
       imageFormat: "png",
       concurrency: 1,
       logLevel: "warn",
-      detachedSandboxTimeoutInMilliseconds: 45 * 60 * 1000,
+      detachedSandboxTimeoutInMilliseconds: 30 * 60 * 1000,
     });
     job = {
       ...job,

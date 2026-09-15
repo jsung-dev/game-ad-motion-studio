@@ -88,6 +88,20 @@ export type VideoAdCompositionProps = {
   outputRatio: OutputRatio;
 };
 
+export type VideoAdSequenceClip = {
+  id: string;
+  videoSrc: string;
+  metadata: VideoMetadata;
+  items: TextItem[];
+  graphics: GraphicItem[];
+};
+
+export type VideoAdSequenceCompositionProps = {
+  clips: VideoAdSequenceClip[];
+  aspectMode: AspectMode;
+  outputRatio: OutputRatio;
+};
+
 export type RenderJobStatus = "queued" | "rendering" | "completed" | "failed";
 
 export type RenderJob = {

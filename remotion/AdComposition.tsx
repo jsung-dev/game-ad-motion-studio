@@ -7,12 +7,21 @@ import {
   interpolate,
   Img,
   OffthreadVideo,
+  Sequence,
   spring,
   staticFile,
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
-import { DEFAULT_OUTPUT_RATIO, OUTPUT_FPS, type GraphicItem, type TextItem, type VideoAdCompositionProps } from "../lib/video-ad/types";
+import { getDurationInFrames } from "../lib/video-ad/validation";
+import {
+  DEFAULT_OUTPUT_RATIO,
+  OUTPUT_FPS,
+  type GraphicItem,
+  type TextItem,
+  type VideoAdCompositionProps,
+  type VideoAdSequenceCompositionProps,
+} from "../lib/video-ad/types";
 
 const FontLoader: React.FC = () => {
   const [handle] = useState(() => delayRender("Noto Sans KR 글꼴을 불러오는 중입니다."));
@@ -173,7 +182,7 @@ const AnimatedGraphic: React.FC<{ item: GraphicItem }> = ({ item }) => {
   );
 };
 
-export const VideoAdComposition: React.FC<VideoAdCompositionProps> = ({
+const VideoAdClip: React.FC<Pick<VideoAdCompositionProps, "videoSrc" | "items" | "graphics" | "aspectMode">> = ({
   videoSrc,
   items,
   graphics,
@@ -181,7 +190,6 @@ export const VideoAdComposition: React.FC<VideoAdCompositionProps> = ({
 }) => {
   return (
     <AbsoluteFill style={{ backgroundColor: "#000000", overflow: "hidden" }}>
-      <FontLoader />
       <OffthreadVideo
         src={videoSrc}
         style={{
@@ -196,6 +204,41 @@ export const VideoAdComposition: React.FC<VideoAdCompositionProps> = ({
       {items.map((item) => (
         <AnimatedText key={item.id} item={item} />
       ))}
+    </AbsoluteFill>
+  );
+};
+
+export const VideoAdComposition: React.FC<VideoAdCompositionProps> = (props) => (
+  <AbsoluteFill style={{ backgroundColor: "#000000", overflow: "hidden" }}>
+    <FontLoader />
+    <VideoAdClip {...props} />
+  </AbsoluteFill>
+);
+
+export const VideoAdSequenceComposition: React.FC<VideoAdSequenceCompositionProps> = ({
+  clips,
+  aspectMode,
+}) => {
+  let from = 0;
+
+  return (
+    <AbsoluteFill style={{ backgroundColor: "#000000", overflow: "hidden" }}>
+      <FontLoader />
+      {clips.map((clip) => {
+        const durationInFrames = getDurationInFrames(clip.metadata.duration);
+        const sequenceFrom = from;
+        from += durationInFrames;
+        return (
+          <Sequence key={clip.id} from={sequenceFrom} durationInFrames={durationInFrames}>
+            <VideoAdClip
+              videoSrc={clip.videoSrc}
+              items={clip.items}
+              graphics={clip.graphics}
+              aspectMode={aspectMode}
+            />
+          </Sequence>
+        );
+      })}
     </AbsoluteFill>
   );
 };

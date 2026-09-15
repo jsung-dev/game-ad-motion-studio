@@ -4,9 +4,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Player, type PlayerRef } from "@remotion/player";
 import { createClient } from "@supabase/supabase-js";
 import {
-  AlertTriangle, Check, CheckCircle2, ChevronDown, Download, Film, ImageIcon,
+  AlertTriangle, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Download, Film, ImageIcon,
   Layers3, LoaderCircle, Maximize2, MonitorPlay, Pause, Play, Settings2,
-  SkipBack, SkipForward, Sparkles, Trash2, Type,
+  RefreshCw, SkipBack, SkipForward, Sparkles, Trash2, Type,
   UploadCloud, Volume2, VolumeX,
 } from "lucide-react";
 import {
@@ -25,6 +25,16 @@ type JobView = {
   progress: number | null;
   error: string | null;
   downloadUrl: string | null;
+};
+
+type EditorClip = {
+  id: string;
+  asset: VideoAsset;
+  fileSize: number;
+  prompt: string;
+  version: number;
+  items: TextItem[];
+  graphics: GraphicItem[];
 };
 
 const LAST_JOB_KEY = "video-ad:last-job";
@@ -109,6 +119,7 @@ type GraphicPlacementPreviewProps = {
   width: number;
   height: number;
   onPositionChange: (xPercent: number, yPercent: number) => void;
+  onWidthChange: (widthPercent: number) => void;
 };
 
 function GraphicPlacementPreview({
@@ -118,9 +129,17 @@ function GraphicPlacementPreview({
   width,
   height,
   onPositionChange,
+  onWidthChange,
 }: GraphicPlacementPreviewProps) {
+  const resizeRef = useRef<{ pointerId: number; startX: number; width: number } | null>(null);
   const updateFromPointer = (event: React.PointerEvent<HTMLDivElement>) => {
     const bounds = event.currentTarget.getBoundingClientRect();
+    const resize = resizeRef.current;
+    if (resize?.pointerId === event.pointerId) {
+      const nextWidth = resize.width + (event.clientX - resize.startX) / bounds.width * 100;
+      onWidthChange(Math.round(Math.max(5, Math.min(100, nextWidth))));
+      return;
+    }
     const x = Math.max(0, Math.min(100, ((event.clientX - bounds.left) / bounds.width) * 100));
     const y = Math.max(0, Math.min(100, ((event.clientY - bounds.top) / bounds.height) * 100));
     onPositionChange(Math.round(x), Math.round(y));
@@ -143,20 +162,43 @@ function GraphicPlacementPreview({
           onPointerMove={(event) => {
             if (event.currentTarget.hasPointerCapture(event.pointerId)) updateFromPointer(event);
           }}
-          onPointerUp={(event) => event.currentTarget.releasePointerCapture(event.pointerId)}
+          onPointerUp={(event) => {
+            resizeRef.current = null;
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+              event.currentTarget.releasePointerCapture(event.pointerId);
+            }
+          }}
         >
           <video src={videoSrc} muted playsInline preload="auto" onLoadedData={(event) => { event.currentTarget.currentTime = Math.min(0.1, event.currentTarget.duration || 0.1); }} style={{ objectFit: aspectMode === "cover" ? "cover" : "contain" }} />
-          <img
-            src={item.sourceUrl}
-            alt="배치할 PNG 카피"
-            draggable={false}
+          <div
+            className={styles.placementPreviewGraphic}
             style={{
               left: `${item.xPercent}%`,
               top: `${item.yPercent}%`,
               width: `${item.widthPercent}%`,
               filter: item.shadow ? "drop-shadow(0 4px 7px rgba(0,0,0,.65))" : "none",
             }}
-          />
+          >
+            <img src={item.sourceUrl} alt="배치할 PNG 카피" draggable={false} />
+            <button
+              type="button"
+              className={styles.placementResizeHandle}
+              aria-label="PNG 비율 유지 크기 조절"
+              title="드래그해서 비율을 유지하며 크기 조절"
+              onPointerDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                const stage = event.currentTarget.closest(`.${styles.placementPreviewStage}`) as HTMLDivElement | null;
+                if (!stage) return;
+                stage.setPointerCapture(event.pointerId);
+                resizeRef.current = {
+                  pointerId: event.pointerId,
+                  startX: event.clientX,
+                  width: item.widthPercent,
+                };
+              }}
+            ><Maximize2 size={10} /></button>
+          </div>
           <span className={styles.placementCrosshair} style={{ left: `${item.xPercent}%`, top: `${item.yPercent}%` }} />
         </div>
       </div>
@@ -166,13 +208,13 @@ function GraphicPlacementPreview({
 
 export function VideoAdEditor() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const replaceInputRef = useRef<HTMLInputElement>(null);
+  const replaceTargetRef = useRef<string | null>(null);
   const graphicInputRef = useRef<HTMLInputElement>(null);
   const playerRef = useRef<PlayerRef>(null);
   const previewSectionRef = useRef<HTMLElement>(null);
-  const [asset, setAsset] = useState<VideoAsset | null>(null);
-  const [assetFileSize, setAssetFileSize] = useState<number | null>(null);
-  const [items, setItems] = useState<TextItem[]>([]);
-  const [graphics, setGraphics] = useState<GraphicItem[]>([]);
+  const [clips, setClips] = useState<EditorClip[]>([]);
+  const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [aspectMode, setAspectMode] = useState<AspectMode>("cover");
   const [outputRatio, setOutputRatio] = useState<OutputRatio>("9:16");
   const [uploading, setUploading] = useState(false);
@@ -185,6 +227,39 @@ export function VideoAdEditor() {
   const [currentFrame, setCurrentFrame] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [playSequence, setPlaySequence] = useState(false);
+
+  const selectedClip = clips.find((clip) => clip.id === selectedClipId) ?? null;
+  const asset = selectedClip?.asset ?? null;
+  const assetFileSize = selectedClip?.fileSize ?? null;
+  const items = selectedClip?.items ?? [];
+  const graphics = selectedClip?.graphics ?? [];
+  const selectedClipIndex = selectedClip
+    ? clips.findIndex((clip) => clip.id === selectedClip.id)
+    : -1;
+  const totalClipDuration = clips.reduce((sum, clip) => sum + clip.asset.metadata.duration, 0);
+  const selectedClipStart = selectedClipIndex > 0
+    ? clips.slice(0, selectedClipIndex).reduce((sum, clip) => sum + clip.asset.metadata.duration, 0)
+    : 0;
+  const sequenceCurrentTime = selectedClipStart + currentFrame / OUTPUT_FPS;
+
+  const setItems = useCallback((action: React.SetStateAction<TextItem[]>) => {
+    if (!selectedClipId) return;
+    setClips((current) => current.map((clip) => {
+      if (clip.id !== selectedClipId) return clip;
+      const next = typeof action === "function" ? action(clip.items) : action;
+      return { ...clip, items: next };
+    }));
+  }, [selectedClipId]);
+
+  const setGraphics = useCallback((action: React.SetStateAction<GraphicItem[]>) => {
+    if (!selectedClipId) return;
+    setClips((current) => current.map((clip) => {
+      if (clip.id !== selectedClipId) return clip;
+      const next = typeof action === "function" ? action(clip.graphics) : action;
+      return { ...clip, graphics: next };
+    }));
+  }, [selectedClipId]);
 
   const duration = asset?.metadata.duration ?? 0;
   const outputDimensions = OUTPUT_RATIOS[outputRatio];
@@ -249,11 +324,25 @@ export function VideoAdEditor() {
     const onFrameUpdate = (event: { detail: { frame: number } }) => setCurrentFrame(event.detail.frame);
     const onPlay = () => setIsPlaying(true);
     const onPause = () => setIsPlaying(false);
+    const onEnded = () => {
+      if (!playSequence || selectedClipIndex < 0) {
+        setIsPlaying(false);
+        return;
+      }
+      const next = clips[selectedClipIndex + 1];
+      if (!next) {
+        setPlaySequence(false);
+        setIsPlaying(false);
+        return;
+      }
+      setSelectedClipId(next.id);
+      setCurrentFrame(0);
+    };
     const onMuteChange = (event: { detail: { isMuted: boolean } }) => setIsMuted(event.detail.isMuted);
     player.addEventListener("frameupdate", onFrameUpdate);
     player.addEventListener("play", onPlay);
     player.addEventListener("pause", onPause);
-    player.addEventListener("ended", onPause);
+    player.addEventListener("ended", onEnded);
     player.addEventListener("mutechange", onMuteChange);
     setCurrentFrame(player.getCurrentFrame());
     setIsPlaying(player.isPlaying());
@@ -262,44 +351,139 @@ export function VideoAdEditor() {
       player.removeEventListener("frameupdate", onFrameUpdate);
       player.removeEventListener("play", onPlay);
       player.removeEventListener("pause", onPause);
-      player.removeEventListener("ended", onPause);
+      player.removeEventListener("ended", onEnded);
       player.removeEventListener("mutechange", onMuteChange);
     };
-  }, [asset, outputRatio]);
+  }, [asset, clips, outputRatio, playSequence, selectedClipIndex]);
 
-  const upload = async (file: File) => {
-    setUploadError(null);
+  useEffect(() => {
+    if (!playSequence || !asset) return;
+    const frame = requestAnimationFrame(() => playerRef.current?.play());
+    return () => cancelAnimationFrame(frame);
+  }, [asset, playSequence]);
+
+  const uploadAsset = async (file: File) => {
     if (!file.name.toLowerCase().endsWith(".mp4")) {
-      setUploadError("현재는 MP4 파일만 지원합니다.");
-      return;
+      throw new Error("현재는 MP4 파일만 지원합니다.");
     }
     const uploadLimit = CLOUD_UPLOADS_ENABLED ? CLOUD_MAX_UPLOAD_BYTES : MAX_UPLOAD_BYTES;
     if (file.size > uploadLimit) {
-      setUploadError(CLOUD_UPLOADS_ENABLED
+      throw new Error(CLOUD_UPLOADS_ENABLED
         ? "현재 웹 버전에서는 영상을 최대 50MB까지 업로드할 수 있습니다."
         : "파일 크기는 최대 100MB까지 업로드할 수 있습니다.");
-      return;
     }
 
+    const result = CLOUD_UPLOADS_ENABLED
+      ? await uploadToCloud<{ asset: VideoAsset }>("video", file)
+      : await (async () => {
+          const form = new FormData();
+          form.append("file", file);
+          const response = await fetch("/api/video-ad/uploads", { method: "POST", body: form });
+          return responseJson<{ asset: VideoAsset }>(response);
+        })();
+    return result.asset;
+  };
+
+  const addClipFiles = async (files: File[]) => {
+    if (!files.length) return;
+    setUploadError(null);
     setUploading(true);
+    const added: EditorClip[] = [];
     try {
-      const result = CLOUD_UPLOADS_ENABLED
-        ? await uploadToCloud<{ asset: VideoAsset }>("video", file)
-        : await (async () => {
-            const form = new FormData();
-            form.append("file", file);
-            const response = await fetch("/api/video-ad/uploads", { method: "POST", body: form });
-            return responseJson<{ asset: VideoAsset }>(response);
-          })();
-      setAsset(result.asset);
-      setAssetFileSize(file.size);
-      setCurrentFrame(0);
+      for (const file of files) {
+        const uploaded = await uploadAsset(file);
+        added.push({
+          id: crypto.randomUUID(),
+          asset: uploaded,
+          fileSize: file.size,
+          prompt: "",
+          version: 1,
+          items: [],
+          graphics: [],
+        });
+      }
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : "업로드에 실패했습니다.");
     } finally {
+      if (added.length) {
+        setClips((current) => [...current, ...added]);
+        if (!selectedClipId) setSelectedClipId(added[0].id);
+        setCurrentFrame(0);
+      }
       setUploading(false);
       if (inputRef.current) inputRef.current.value = "";
     }
+  };
+
+  const replaceClipFile = async (clipId: string, file: File) => {
+    setUploadError(null);
+    setUploading(true);
+    try {
+      const uploaded = await uploadAsset(file);
+      setClips((current) => current.map((clip) => clip.id === clipId ? {
+        ...clip,
+        asset: uploaded,
+        fileSize: file.size,
+        version: clip.version + 1,
+      } : clip));
+      setSelectedClipId(clipId);
+      setPlaySequence(false);
+      setIsPlaying(false);
+      setCurrentFrame(0);
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "컷을 교체하지 못했습니다.");
+    } finally {
+      setUploading(false);
+      replaceTargetRef.current = null;
+      if (replaceInputRef.current) replaceInputRef.current.value = "";
+    }
+  };
+
+  const selectClip = (clipId: string) => {
+    setPlaySequence(false);
+    setIsPlaying(false);
+    setSelectedClipId(clipId);
+    setCurrentFrame(0);
+  };
+
+  const moveClip = (clipId: string, direction: -1 | 1) => {
+    setClips((current) => {
+      const index = current.findIndex((clip) => clip.id === clipId);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+    setPlaySequence(false);
+  };
+
+  const removeClip = (clipId: string) => {
+    const index = clips.findIndex((clip) => clip.id === clipId);
+    const next = clips.filter((clip) => clip.id !== clipId);
+    setClips(next);
+    if (selectedClipId === clipId) {
+      setSelectedClipId(next[Math.min(index, next.length - 1)]?.id ?? null);
+    }
+    setPlaySequence(false);
+    setIsPlaying(false);
+    setCurrentFrame(0);
+  };
+
+  const updateClipPrompt = (clipId: string, prompt: string) => {
+    setClips((current) =>
+      current.map((clip) => clip.id === clipId ? { ...clip, prompt } : clip),
+    );
+  };
+
+  const startSequencePlayback = () => {
+    if (!clips.length) return;
+    if (selectedClipId === clips[0].id) {
+      playerRef.current?.seekTo(0);
+    }
+    setSelectedClipId(clips[0].id);
+    setCurrentFrame(0);
+    setPlaySequence(true);
   };
 
   const uploadGraphic = async (file: File) => {
@@ -440,7 +624,7 @@ export function VideoAdEditor() {
           </button>
           <button type="button" className={styles.headerPrimary} disabled={!asset || activeJob || editorErrors.length > 0} onClick={() => void startRender()}>
             {activeJob ? <LoaderCircle className={styles.spin} size={16} /> : <Film size={16} />}
-            내보내기
+            선택 컷 내보내기
           </button>
         </div>
       </header>
@@ -453,7 +637,7 @@ export function VideoAdEditor() {
                 <span className={styles.panelIcon}><UploadCloud size={16} /></span>
                 <div><h2>영상 에셋</h2><p>편집할 원본을 추가하세요</p></div>
               </div>
-              <span className={styles.countBadge}>{asset ? 1 : 0}/1</span>
+              <span className={styles.countBadge}>{clips.length}개 컷</span>
             </div>
 
             <input
@@ -461,9 +645,21 @@ export function VideoAdEditor() {
               className={styles.hiddenInput}
               type="file"
               accept="video/mp4,.mp4"
+              multiple
+              onChange={(event) => {
+                const files = Array.from(event.target.files ?? []);
+                if (files.length) void addClipFiles(files);
+              }}
+            />
+            <input
+              ref={replaceInputRef}
+              className={styles.hiddenInput}
+              type="file"
+              accept="video/mp4,.mp4"
               onChange={(event) => {
                 const file = event.target.files?.[0];
-                if (file) void upload(file);
+                const clipId = replaceTargetRef.current;
+                if (file && clipId) void replaceClipFile(clipId, file);
               }}
             />
             <button
@@ -477,27 +673,72 @@ export function VideoAdEditor() {
               onDrop={(event) => {
                 event.preventDefault();
                 setDragging(false);
-                const file = event.dataTransfer.files?.[0];
-                if (file) void upload(file);
+                const files = Array.from(event.dataTransfer.files ?? []);
+                if (files.length) void addClipFiles(files);
               }}
             >
               <span className={styles.uploadIcon}>{uploading ? <LoaderCircle className={styles.spin} /> : <UploadCloud />}</span>
-              <strong>{uploading ? "영상 분석 및 저장 중…" : asset ? "다른 영상으로 교체" : "영상을 드래그하거나 선택"}</strong>
-              <span>{asset ? "기존 문구 설정은 그대로 유지됩니다" : "클릭해서 컴퓨터에서 파일 찾기"}</span>
+              <strong>{uploading ? "영상 분석 및 저장 중…" : clips.length ? "영상 컷 더 추가" : "영상을 드래그하거나 선택"}</strong>
+              <span>{clips.length ? "여러 MP4를 추가하거나 아래에서 개별 교체하세요" : "여러 파일을 한 번에 선택할 수 있습니다"}</span>
               <span className={styles.formatTags}>
                 <em>MP4</em><em>최대 {CLOUD_UPLOADS_ENABLED ? "50MB" : "100MB"}</em><em>최대 30초</em>
               </span>
             </button>
             {uploadError && <p className={styles.errorBox}>{uploadError}</p>}
-            {asset && (
+            {selectedClip && asset && (
               <div className={styles.assetCard}>
                 <video className={styles.assetThumbnail} src={asset.sourceUrl} muted playsInline preload="metadata" />
                 <div className={styles.assetInfo}>
                   <strong title={asset.originalName}>{asset.originalName}</strong>
-                  <span>{asset.metadata.duration.toFixed(2)}초 · {asset.metadata.width}×{asset.metadata.height}</span>
+                  <span>선택 컷 {selectedClipIndex + 1} · 버전 {selectedClip.version} · {asset.metadata.duration.toFixed(2)}초</span>
                   <span>{assetFileSize ? `${(assetFileSize / 1024 / 1024).toFixed(1)}MB · ` : ""}{asset.metadata.hasAudio ? "오디오 있음" : "무음 영상"}</span>
                 </div>
-                <button type="button" className={styles.assetRemove} aria-label="업로드 영상 제거" onClick={() => { setAsset(null); setAssetFileSize(null); setCurrentFrame(0); setIsPlaying(false); }}><Trash2 size={15} /></button>
+                <button type="button" className={styles.assetRemove} aria-label="선택 컷 삭제" onClick={() => removeClip(selectedClip.id)}><Trash2 size={15} /></button>
+              </div>
+            )}
+
+            {clips.length > 0 && (
+              <div className={styles.clipManager}>
+                <div className={styles.clipManagerHeader}>
+                  <span><Layers3 size={13} /> 컷 구성</span>
+                  <button type="button" onClick={startSequencePlayback}>
+                    <Play size={12} /> 전체 재생
+                  </button>
+                </div>
+                <div className={styles.clipManagerList}>
+                  {clips.map((clip, index) => (
+                    <article
+                      key={clip.id}
+                      className={clip.id === selectedClipId ? styles.selectedClipCard : ""}
+                      onClick={() => selectClip(clip.id)}
+                    >
+                      <video src={clip.asset.sourceUrl} muted playsInline preload="metadata" />
+                      <span className={styles.clipNumber}>{index + 1}</span>
+                      <div>
+                        <strong title={clip.asset.originalName}>{clip.asset.originalName}</strong>
+                        <small>{clip.asset.metadata.duration.toFixed(2)}초 · 레이어 {clip.items.length + clip.graphics.length}개</small>
+                      </div>
+                      <div className={styles.clipCardActions}>
+                        <button type="button" title="앞으로 이동" disabled={index === 0} onClick={(event) => { event.stopPropagation(); moveClip(clip.id, -1); }}><ChevronLeft size={13} /></button>
+                        <button type="button" title="뒤로 이동" disabled={index === clips.length - 1} onClick={(event) => { event.stopPropagation(); moveClip(clip.id, 1); }}><ChevronRight size={13} /></button>
+                        <button type="button" title="이 컷만 새 MP4로 교체" onClick={(event) => { event.stopPropagation(); replaceTargetRef.current = clip.id; replaceInputRef.current?.click(); }}><RefreshCw size={12} /></button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+                {selectedClip && (
+                  <label className={styles.clipPrompt}>
+                    <span>선택 컷 생성 메모</span>
+                    <textarea
+                      rows={2}
+                      value={selectedClip.prompt}
+                      placeholder="예: 캐릭터가 보스를 향해 달려가는 3초 장면"
+                      onChange={(event) => updateClipPrompt(selectedClip.id, event.target.value)}
+                    />
+                    <small>영상 생성 API 연결 시 이 컷만 재생성하는 입력값으로 사용됩니다.</small>
+                  </label>
+                )}
+                <p className={styles.sequenceSummary}>총 {clips.length}개 컷 · {totalClipDuration.toFixed(2)}초</p>
               </div>
             )}
 
@@ -612,6 +853,7 @@ export function VideoAdEditor() {
                           entry.id === item.id ? { ...entry, xPercent, yPercent } : entry
                         ));
                       }}
+                      onWidthChange={(widthPercent) => updateGraphic(item.id, "widthPercent", widthPercent)}
                     />
                     <div className={styles.quickFieldGrid}>
                       <label><span>시작 (초)</span><input type="number" min="0" step="0.01" value={item.start} onChange={(event) => updateGraphic(item.id, "start", event.target.valueAsNumber)} /></label>
@@ -639,8 +881,8 @@ export function VideoAdEditor() {
           <div className={styles.sticky}>
             <section className={styles.canvasPanel} ref={previewSectionRef}>
               <div className={styles.previewHeading}>
-                <div><span className={styles.liveDot} /> 컴포지션 미리보기</div>
-                <span>{outputDimensions.width} × {outputDimensions.height} · {OUTPUT_FPS}fps</span>
+                <div><span className={styles.liveDot} /> {selectedClip ? `컷 ${selectedClipIndex + 1}/${clips.length}` : "컴포지션"} 미리보기</div>
+                <span>{outputDimensions.width} × {outputDimensions.height} · {OUTPUT_FPS}fps · 전체 {totalClipDuration.toFixed(2)}초</span>
               </div>
               <div className={styles.canvasSurface}>
                 <div className={styles.playerShell} style={{ aspectRatio: `${outputDimensions.width} / ${outputDimensions.height}` }}>
@@ -671,7 +913,7 @@ export function VideoAdEditor() {
                 <span className={styles.timecode}>{formatTime(currentFrame / OUTPUT_FPS)}</span>
                 <div className={styles.transportButtons}>
                   <button type="button" aria-label="이전 프레임" disabled={!asset} onClick={() => playerRef.current?.seekTo(Math.max(0, currentFrame - 1))}><SkipBack size={16} /></button>
-                  <button type="button" className={styles.playButton} aria-label={isPlaying ? "일시정지" : "재생"} disabled={!asset} onClick={(event) => playerRef.current?.toggle(event)}>{isPlaying ? <Pause size={17} /> : <Play size={17} />}</button>
+                  <button type="button" className={styles.playButton} aria-label={isPlaying ? "일시정지" : "재생"} disabled={!asset} onClick={(event) => { setPlaySequence(false); playerRef.current?.toggle(event); }}>{isPlaying ? <Pause size={17} /> : <Play size={17} />}</button>
                   <button type="button" aria-label="다음 프레임" disabled={!asset} onClick={() => playerRef.current?.seekTo(Math.min(durationInFrames - 1, currentFrame + 1))}><SkipForward size={16} /></button>
                 </div>
                 <div className={styles.transportUtility}>
@@ -688,6 +930,29 @@ export function VideoAdEditor() {
                 <div className={styles.timelineRuler}>
                   <span>0초</span><span>{duration ? `${(duration / 2).toFixed(1)}초` : "—"}</span><span>{duration ? `${duration.toFixed(1)}초` : "—"}</span>
                 </div>
+                {clips.length > 0 && (
+                  <div className={styles.sequenceTimeline}>
+                    <span className={styles.trackLabel}><Film size={14} /> 전체 컷</span>
+                    <div className={styles.sequenceLane}>
+                      {clips.map((clip, index) => (
+                        <button
+                          type="button"
+                          key={clip.id}
+                          className={clip.id === selectedClipId ? styles.selectedSequenceClip : ""}
+                          style={{ width: `${clip.asset.metadata.duration / totalClipDuration * 100}%` }}
+                          onClick={() => selectClip(clip.id)}
+                          title={clip.asset.originalName}
+                        >
+                          {index + 1}
+                        </button>
+                      ))}
+                      <span
+                        className={styles.sequencePlayhead}
+                        style={{ left: `${Math.min(100, sequenceCurrentTime / totalClipDuration * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
                 <div className={styles.timelineBody}>
                   {timelineTracks.map(({ key, label, icon: TrackIcon }) => (
                     <div className={styles.timelineRow} key={key}>
@@ -726,7 +991,7 @@ export function VideoAdEditor() {
               <summary className={styles.settingsSummary}><span><Settings2 size={16} /> 출력 설정</span><ChevronDown size={16} /></summary>
               <div className={styles.sectionTitle}>
                 <span className={styles.panelIcon}><Settings2 size={16} /></span>
-                <div><h2>출력 설정</h2><p>최종 영상의 화면과 품질을 정하세요</p></div>
+                <div><h2>출력 설정</h2><p>현재 선택한 컷의 화면과 품질을 정하세요</p></div>
               </div>
               <div className={styles.ratioGrid}>
                 {outputRatios.map((ratio) => {
@@ -783,7 +1048,7 @@ export function VideoAdEditor() {
               ) : (
                 <button type="button" className={styles.primaryButton} disabled={!asset || activeJob || editorErrors.length > 0} onClick={() => void startRender()}>
                   {activeJob ? <LoaderCircle className={styles.spin} size={18} /> : <Film size={18} />}
-                  <span><strong>{activeJob ? "렌더링 중…" : job?.status === "failed" ? "다시 렌더링" : "렌더링 시작"}</strong><small>로컬 렌더 · 크레딧 0</small></span>
+                  <span><strong>{activeJob ? "렌더링 중…" : job?.status === "failed" ? "다시 렌더링" : "선택 컷 렌더링"}</strong><small>기존 렌더 기능 · 크레딧 0</small></span>
                 </button>
               )}
               {job?.status === "completed" && (

@@ -33,7 +33,6 @@ type EditorClip = {
   fileSize: number;
   prompt: string;
   version: number;
-  graphics: GraphicItem[];
 };
 
 const LAST_JOB_KEY = "video-ad:last-job";
@@ -222,6 +221,7 @@ export function VideoAdEditor() {
   const [clips, setClips] = useState<EditorClip[]>([]);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [items, setItems] = useState<TextItem[]>([]);
+  const [graphics, setGraphics] = useState<GraphicItem[]>([]);
   const [aspectMode, setAspectMode] = useState<AspectMode>("cover");
   const [outputRatio, setOutputRatio] = useState<OutputRatio>("9:16");
   const [uploading, setUploading] = useState(false);
@@ -238,7 +238,6 @@ export function VideoAdEditor() {
   const selectedClip = clips.find((clip) => clip.id === selectedClipId) ?? null;
   const asset = selectedClip?.asset ?? null;
   const assetFileSize = selectedClip?.fileSize ?? null;
-  const graphics = selectedClip?.graphics ?? [];
   const selectedClipIndex = selectedClip
     ? clips.findIndex((clip) => clip.id === selectedClip.id)
     : -1;
@@ -271,27 +270,19 @@ export function VideoAdEditor() {
     videoSrc: clip.asset.sourceUrl,
     metadata: clip.asset.metadata,
     durationInFrames: clipFrameCounts[index],
-    graphics: clip.graphics,
+    graphics: [],
   })), [clipFrameCounts, clips]);
   const previewInputProps = useMemo(() => ({
     clips: previewClips,
     items,
+    graphics,
     aspectMode,
     outputRatio,
-  }), [aspectMode, items, outputRatio, previewClips]);
+  }), [aspectMode, graphics, items, outputRatio, previewClips]);
   const sequencePlayerKey = useMemo(
     () => `${outputRatio}:${previewFps}:${clips.map((clip) => `${clip.id}:${clip.asset.id}`).join("|")}`,
     [clips, outputRatio, previewFps],
   );
-
-  const setGraphics = useCallback((action: React.SetStateAction<GraphicItem[]>) => {
-    if (!selectedClipId) return;
-    setClips((current) => current.map((clip) => {
-      if (clip.id !== selectedClipId) return clip;
-      const next = typeof action === "function" ? action(clip.graphics) : action;
-      return { ...clip, graphics: next };
-    }));
-  }, [selectedClipId]);
 
   const duration = asset?.metadata.duration ?? 0;
   const selectedClipStartTime = selectedClipStartFrame / previewFps;
@@ -303,14 +294,27 @@ export function VideoAdEditor() {
       start: Math.max(0, item.start - selectedClipStartTime),
       end: Math.min(duration, item.end - selectedClipStartTime),
     })), [duration, items, selectedClipEndTime, selectedClipStartTime]);
+  const selectedRenderGraphics = useMemo(() => graphics
+    .filter((item) => item.end > selectedClipStartTime && item.start < selectedClipEndTime)
+    .map((item) => ({
+      ...item,
+      start: Math.max(0, item.start - selectedClipStartTime),
+      end: Math.min(duration, item.end - selectedClipStartTime),
+    })), [duration, graphics, selectedClipEndTime, selectedClipStartTime]);
   const outputDimensions = OUTPUT_RATIOS[outputRatio];
   const editorErrors = useMemo(() => {
     if (!asset) return [];
-    const errors = validateEditorPayload([], asset.metadata, graphics);
+    const errors = validateEditorPayload([], asset.metadata, []);
     if (items.length > 20) errors.push("문구는 최대 20개까지 추가할 수 있습니다.");
+    if (graphics.length > 10) errors.push("PNG 카피는 최대 10개까지 추가할 수 있습니다.");
     items.forEach((item, index) => {
       getItemErrors(item, totalClipDuration).forEach((error) => {
         errors.push(`${index + 1}번 문구: ${error}`);
+      });
+    });
+    graphics.forEach((item, index) => {
+      getGraphicItemErrors(item, totalClipDuration).forEach((error) => {
+        errors.push(`PNG 카피 ${index + 1}번: ${error}`);
       });
     });
     return errors;
@@ -319,38 +323,23 @@ export function VideoAdEditor() {
 
   const timelineSegments = useMemo(() => {
     const video: Array<{ id: string; start: number; end: number }> = [];
-    const image: Array<{ id: string; start: number; end: number }> = [];
-    const graphicEffects: Array<{ id: string; start: number; end: number }> = [];
     clips.forEach((clip, clipIndex) => {
       const clipStart = (clipStartFrames[clipIndex] ?? 0) / previewFps;
       const clipEnd = clipStart + (clipFrameCounts[clipIndex] ?? 1) / previewFps;
       video.push({ id: clip.id, start: clipStart, end: clipEnd });
-      clip.graphics.forEach((graphic) => {
-        image.push({
-          id: graphic.id,
-          start: clipStart + graphic.start,
-          end: clipStart + graphic.end,
-        });
-        if (graphic.motion !== "none") {
-          graphicEffects.push({
-            id: `effect-${graphic.id}`,
-            start: clipStart + graphic.start,
-            end: clipStart + graphic.end,
-          });
-        }
-      });
     });
     return {
       video,
-      image,
+      image: graphics.map((item) => ({ id: item.id, start: item.start, end: item.end })),
       text: items.map((item) => ({ id: item.id, start: item.start, end: item.end })),
       effect: [
         ...items.filter((item) => item.motion !== "none")
           .map((item) => ({ id: `effect-${item.id}`, start: item.start, end: item.end })),
-        ...graphicEffects,
+        ...graphics.filter((item) => item.motion !== "none")
+          .map((item) => ({ id: `effect-${item.id}`, start: item.start, end: item.end })),
       ],
     };
-  }, [clipFrameCounts, clipStartFrames, clips, items, previewFps]);
+  }, [clipFrameCounts, clipStartFrames, clips, graphics, items, previewFps]);
 
   const readJob = useCallback(async (jobId: string) => {
     const response = await fetch(`/api/video-ad/renders/${jobId}`, { cache: "no-store" });
@@ -482,7 +471,6 @@ export function VideoAdEditor() {
           fileSize: file.size,
           prompt: "",
           version: 1,
-          graphics: [],
         });
       }
     } catch (error) {
@@ -610,8 +598,8 @@ export function VideoAdEditor() {
         originalName: result.asset.originalName,
         intrinsicWidth: result.asset.width,
         intrinsicHeight: result.asset.height,
-        start: 0,
-        end: Math.min(duration, 2.5),
+        start: selectedClipStartTime,
+        end: Math.min(totalClipDuration, selectedClipStartTime + 2.5),
         xPercent: 50,
         yPercent: 50,
         widthPercent: 60,
@@ -689,6 +677,40 @@ export function VideoAdEditor() {
     seekToTextPreview(start, end);
   };
 
+  const updateGraphicStart = (id: string, nextStart: number) => {
+    if (!Number.isFinite(nextStart) || totalClipDuration <= 0) return;
+    const item = graphics.find((entry) => entry.id === id);
+    if (!item) return;
+    const minimumDuration = 1 / previewFps;
+    const currentDuration = Math.max(minimumDuration, item.end - item.start);
+    const start = Math.max(0, Math.min(nextStart, totalClipDuration - minimumDuration));
+    const adjustedEnd = start >= item.end
+      ? Math.min(totalClipDuration, start + currentDuration)
+      : item.end;
+    const end = Math.max(start + minimumDuration, adjustedEnd);
+    setGraphics((current) => current.map((entry) => (
+      entry.id === id ? { ...entry, start, end } : entry
+    )));
+    seekToTextPreview(start, end);
+  };
+
+  const updateGraphicEnd = (id: string, nextEnd: number) => {
+    if (!Number.isFinite(nextEnd) || totalClipDuration <= 0) return;
+    const item = graphics.find((entry) => entry.id === id);
+    if (!item) return;
+    const minimumDuration = 1 / previewFps;
+    const currentDuration = Math.max(minimumDuration, item.end - item.start);
+    const end = Math.max(minimumDuration, Math.min(nextEnd, totalClipDuration));
+    const adjustedStart = end <= item.start
+      ? Math.max(0, end - currentDuration)
+      : item.start;
+    const start = Math.min(adjustedStart, end - minimumDuration);
+    setGraphics((current) => current.map((entry) => (
+      entry.id === id ? { ...entry, start, end } : entry
+    )));
+    seekToTextPreview(start, end);
+  };
+
   const addItem = () => {
     if (!clips.length || items.length >= 20) return;
     const item = createDefaultTextItem();
@@ -727,7 +749,7 @@ export function VideoAdEditor() {
       const response = await fetch("/api/video-ad/renders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assetId: asset.id, items: selectedRenderItems, graphics, aspectMode, outputRatio }),
+        body: JSON.stringify({ assetId: asset.id, items: selectedRenderItems, graphics: selectedRenderGraphics, aspectMode, outputRatio }),
       });
       const created = await responseJson<{ jobId: string; status: RenderJobStatus }>(response);
       localStorage.setItem(LAST_JOB_KEY, created.jobId);
@@ -853,6 +875,7 @@ export function VideoAdEditor() {
                     const clipStart = (clipStartFrames[index] ?? 0) / previewFps;
                     const clipEnd = clipStart + (clipFrameCounts[index] ?? 1) / previewFps;
                     const textLayerCount = items.filter((item) => item.end > clipStart && item.start < clipEnd).length;
+                    const graphicLayerCount = graphics.filter((item) => item.end > clipStart && item.start < clipEnd).length;
                     return (
                       <article
                       key={clip.id}
@@ -867,7 +890,7 @@ export function VideoAdEditor() {
                       <span className={styles.clipNumber}>{index + 1}</span>
                       <div>
                         <strong title={clip.asset.originalName}>{clip.asset.originalName}</strong>
-                        <small>{clip.asset.metadata.duration.toFixed(2)}초 · {clip.asset.metadata.fps.toFixed(1)}fps · 레이어 {textLayerCount + clip.graphics.length}개</small>
+                        <small>{clip.asset.metadata.duration.toFixed(2)}초 · {clip.asset.metadata.fps.toFixed(1)}fps · 레이어 {textLayerCount + graphicLayerCount}개</small>
                       </div>
                       <div className={styles.clipCardActions}>
                         <button type="button" title="앞으로 이동" disabled={index === 0} onClick={(event) => { event.stopPropagation(); moveClip(clip.id, -1); }}><ChevronLeft size={13} /></button>
@@ -911,7 +934,7 @@ export function VideoAdEditor() {
             <div className={styles.sectionTitleRow}>
               <div className={styles.sectionTitle}>
                 <span className={styles.panelIcon}><Layers3 size={16} /></span>
-                <div><h2>레이어 편집</h2><p>텍스트는 전체 시간, PNG는 선택 컷 기준입니다</p></div>
+                <div><h2>레이어 편집</h2><p>텍스트와 PNG 모두 전체 타임라인 기준입니다</p></div>
               </div>
               <div className={styles.inlineActions}>
                 <input
@@ -933,7 +956,7 @@ export function VideoAdEditor() {
             {clips.length > 0 && (
               <div className={styles.timelineScopeNotice}>
                 <strong>전체 타임라인 0초–{totalClipDuration.toFixed(2)}초</strong>
-                <span>텍스트는 컷 경계를 넘어 표시할 수 있습니다. 예: 3초–{totalClipDuration.toFixed(2)}초</span>
+                <span>텍스트와 PNG는 컷 경계를 넘어 표시할 수 있습니다. 예: 3초–{totalClipDuration.toFixed(2)}초</span>
               </div>
             )}
             {!asset && <div className={styles.empty}>먼저 영상을 업로드하면 문구를 편집할 수 있습니다.</div>}
@@ -1010,7 +1033,7 @@ export function VideoAdEditor() {
                 );
               })}
               {graphics.map((item, index) => {
-                const errors = getGraphicItemErrors(item, duration);
+                const errors = getGraphicItemErrors(item, totalClipDuration);
                 return (
                   <article className={`${styles.textCard} ${styles.graphicCard} ${errors.length ? styles.invalid : ""}`} key={item.id}>
                     <div className={styles.textCardHeader}>
@@ -1037,10 +1060,32 @@ export function VideoAdEditor() {
                       onWidthChange={(widthPercent) => updateGraphic(item.id, "widthPercent", widthPercent)}
                     />
                     <div className={styles.quickFieldGrid}>
-                      <label><span>시작 (초)</span><input type="number" min="0" step="0.01" value={item.start} onChange={(event) => updateGraphic(item.id, "start", event.target.valueAsNumber)} /></label>
-                      <label><span>종료 (초)</span><input type="number" min="0.01" step="0.01" value={item.end} onChange={(event) => updateGraphic(item.id, "end", event.target.valueAsNumber)} /></label>
+                      <label><span>시작 (초)</span><input type="number" min="0" max={Math.max(0, totalClipDuration - 1 / previewFps)} step="0.01" value={item.start} onChange={(event) => updateGraphicStart(item.id, event.target.valueAsNumber)} /></label>
+                      <label><span>종료 (초)</span><input type="number" min={1 / previewFps} max={totalClipDuration} step="0.01" value={item.end} onChange={(event) => updateGraphicEnd(item.id, event.target.valueAsNumber)} /></label>
                       <label><span>모션</span><select value={item.motion} onChange={(event) => updateGraphic(item.id, "motion", event.target.value as MotionPreset)}>{motions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
                       <label><span>크기 (%)</span><input type="number" min="5" max="100" step="1" value={item.widthPercent} onChange={(event) => updateGraphic(item.id, "widthPercent", event.target.valueAsNumber)} /></label>
+                    </div>
+                    <div className={styles.globalRangeEditor}>
+                      <div className={styles.globalRangeHeader}>
+                        <strong>PNG 전체 노출 구간</strong>
+                        <span>{item.start.toFixed(2)}초 → {item.end.toFixed(2)}초 / 총 {totalClipDuration.toFixed(2)}초</span>
+                      </div>
+                      <div className={styles.globalRangeTrack} aria-hidden="true">
+                        <span
+                          style={{
+                            left: `${totalClipDuration ? item.start / totalClipDuration * 100 : 0}%`,
+                            width: `${totalClipDuration ? Math.max(0, item.end - item.start) / totalClipDuration * 100 : 0}%`,
+                          }}
+                        />
+                      </div>
+                      <label>
+                        <span>시작</span>
+                        <input type="range" min="0" max={Math.max(0, totalClipDuration - 1 / previewFps)} step="0.01" value={item.start} onChange={(event) => updateGraphicStart(item.id, event.target.valueAsNumber)} />
+                      </label>
+                      <label>
+                        <span>종료</span>
+                        <input type="range" min={1 / previewFps} max={totalClipDuration} step="0.01" value={item.end} onChange={(event) => updateGraphicEnd(item.id, event.target.valueAsNumber)} />
+                      </label>
                     </div>
                     <div className={styles.graphicPositionGrid}>
                       <label><span>가로 위치 {item.xPercent}%</span><input type="range" min="0" max="100" step="1" value={item.xPercent} onChange={(event) => updateGraphic(item.id, "xPercent", event.target.valueAsNumber)} /></label>

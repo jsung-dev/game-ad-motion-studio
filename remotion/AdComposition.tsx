@@ -218,6 +218,7 @@ export const VideoAdComposition: React.FC<VideoAdCompositionProps> = (props) => 
 export const VideoAdSequenceComposition: React.FC<VideoAdSequenceCompositionProps> = ({
   clips,
   items,
+  graphics,
   aspectMode,
 }) => {
   const { fps } = useVideoConfig();
@@ -248,6 +249,9 @@ export const VideoAdSequenceComposition: React.FC<VideoAdSequenceCompositionProp
       })}
       {items.map((item) => (
         <AnimatedText key={item.id} item={item} />
+      ))}
+      {graphics.map((item) => (
+        <AnimatedGraphic key={item.id} item={item} />
       ))}
     </AbsoluteFill>
   );

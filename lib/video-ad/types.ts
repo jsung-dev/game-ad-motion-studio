@@ -99,6 +99,7 @@ export type VideoAdSequenceClip = {
 export type VideoAdSequenceCompositionProps = {
   clips: VideoAdSequenceClip[];
   items: TextItem[];
+  graphics: GraphicItem[];
   aspectMode: AspectMode;
   outputRatio: OutputRatio;
 };

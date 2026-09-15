@@ -62,6 +62,7 @@ export const startCloudSequenceRender = async (settings: CloudSequenceSettings) 
     job = { ...job, status: "rendering", stage: "렌더링 환경 시작 중", updatedAt: new Date().toISOString() };
     await writeCloudRenderJob(job);
     sandbox = await createSandbox({ timeoutInMilliseconds: 5 * 60 * 1000 });
+    await sandbox.mkDir("remotion-bundle");
     await addBundleToSandbox({ sandbox, bundleDir });
     const inputProps: VideoAdSequenceCompositionProps = {
       clips: settings.clips.map((clip, index) => ({

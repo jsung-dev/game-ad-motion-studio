@@ -77,7 +77,7 @@ NEXT_PUBLIC_VIDEO_STORAGE_MODE=supabase
 BLOB_READ_WRITE_TOKEN=...
 ```
 
-`SUPABASE_SECRET_KEY`와 `BLOB_READ_WRITE_TOKEN`은 서버 전용이며 `NEXT_PUBLIC_` 접두사를 붙이면 안 됩니다. Vercel 배포의 최종 렌더는 Vercel Sandbox에서 실행되고 완성 MP4는 비공개 Vercel Blob에 보관됩니다. 브라우저에는 Blob 원본 주소를 노출하지 않고 앱의 다운로드 API가 파일을 전달합니다. 렌더 작업 상태는 기존 Supabase Storage에 저장됩니다. 현재 연결된 Supabase 무료 프로젝트의 객체 한도에 맞춰 웹 배포 업로드는 최대 50MB이고, 로컬 업로드는 기존대로 최대 100MB입니다.
+`SUPABASE_SECRET_KEY`와 `BLOB_READ_WRITE_TOKEN`은 서버 전용이며 `NEXT_PUBLIC_` 접두사를 붙이면 안 됩니다. Vercel 배포의 최종 렌더는 Vercel Sandbox에서 실행되고 완성 MP4와 작업 상태는 비공개 Vercel Blob에 보관됩니다. 브라우저에는 Blob 원본 주소를 노출하지 않고 앱의 다운로드 API가 파일을 전달합니다. `pnpm build`는 공식 Vercel 템플릿 방식으로 `.remotion` 번들을 미리 만들고 렌더 API 배포 파일에 포함합니다. 현재 연결된 Supabase 무료 프로젝트의 객체 한도에 맞춰 웹 배포 업로드는 최대 50MB이고, 로컬 업로드는 기존대로 최대 100MB입니다.
 
 배포된 업로드 경로만 실제 점검하려면 위 환경 변수를 셸에 설정한 뒤 다음처럼 실행합니다. 테스트 MP4와 Storage 객체는 점검 직후 자동 삭제됩니다.
 

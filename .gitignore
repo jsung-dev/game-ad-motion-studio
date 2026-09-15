@@ -17,3 +17,4 @@ test-artifacts/video-ad/
 katalk-fact-checker/
 
 .env*
+.remotion/

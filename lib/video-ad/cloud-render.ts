@@ -1,8 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import path from "node:path";
-import { bundle } from "@remotion/bundler";
 import { addBundleToSandbox, createSandbox, getRenderProgress, renderMediaOnVercel } from "@remotion/vercel";
 import { Sandbox } from "@vercel/sandbox";
 import { createCloudReadUrl } from "./cloud-storage";
@@ -51,7 +48,7 @@ export const startCloudSequenceRender = async (settings: CloudSequenceSettings) 
   await writeCloudRenderJob(job);
 
   let sandbox: Awaited<ReturnType<typeof createSandbox>> | null = null;
-  const bundleDir = path.join(tmpdir(), `video-ad-remotion-${id}`);
+  const bundleDir = path.resolve(process.cwd(), ".remotion");
   try {
     const clipUrls = await Promise.all(
       settings.clips.map((clip) => createCloudReadUrl("video", clip.assetId, 60 * 60)),
@@ -62,15 +59,8 @@ export const startCloudSequenceRender = async (settings: CloudSequenceSettings) 
     if (clipUrls.some((url) => !url)) throw new Error("업로드한 영상 컷을 찾을 수 없습니다.");
     if (graphicUrls.some((url) => !url)) throw new Error("업로드한 PNG 카피를 찾을 수 없습니다.");
 
-    job = { ...job, status: "rendering", stage: "영상 템플릿 번들링 중", updatedAt: new Date().toISOString() };
+    job = { ...job, status: "rendering", stage: "렌더링 환경 시작 중", updatedAt: new Date().toISOString() };
     await writeCloudRenderJob(job);
-    await bundle({
-      entryPoint: path.resolve(process.cwd(), "remotion", "index.ts"),
-      publicDir: path.resolve(process.cwd(), "public"),
-      outDir: bundleDir,
-      onProgress: () => undefined,
-    });
-
     sandbox = await createSandbox({ timeoutInMilliseconds: 5 * 60 * 1000 });
     await addBundleToSandbox({ sandbox, bundleDir });
     const inputProps: VideoAdSequenceCompositionProps = {
@@ -129,8 +119,6 @@ export const startCloudSequenceRender = async (settings: CloudSequenceSettings) 
     };
     await writeCloudRenderJob(job).catch(() => undefined);
     throw error;
-  } finally {
-    await rm(bundleDir, { recursive: true, force: true }).catch(() => undefined);
   }
 };
 

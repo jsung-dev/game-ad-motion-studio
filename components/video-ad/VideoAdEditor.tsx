@@ -35,6 +35,19 @@ type EditorClip = {
   version: number;
 };
 
+type EditableTimelineTrack = "text" | "image";
+type TimelineDragMode = "move" | "resize-start" | "resize-end";
+type TimelineDrag = {
+  pointerId: number;
+  track: EditableTimelineTrack;
+  id: string;
+  mode: TimelineDragMode;
+  originX: number;
+  laneWidth: number;
+  start: number;
+  end: number;
+};
+
 const LAST_JOB_KEY = "video-ad:last-job";
 const CLOUD_UPLOADS_ENABLED = process.env.NEXT_PUBLIC_VIDEO_STORAGE_MODE === "supabase";
 const motions: Array<{ value: MotionPreset; label: string }> = [
@@ -218,6 +231,8 @@ export function VideoAdEditor() {
   const playerRef = useRef<PlayerRef>(null);
   const currentFrameRef = useRef(0);
   const previewSectionRef = useRef<HTMLElement>(null);
+  const timelineDragRef = useRef<TimelineDrag | null>(null);
+  const draggedClipIdRef = useRef<string | null>(null);
   const [clips, setClips] = useState<EditorClip[]>([]);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [items, setItems] = useState<TextItem[]>([]);
@@ -234,6 +249,7 @@ export function VideoAdEditor() {
   const [currentFrame, setCurrentFrame] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [snapGuide, setSnapGuide] = useState<number | null>(null);
 
   const selectedClip = clips.find((clip) => clip.id === selectedClipId) ?? null;
   const asset = selectedClip?.asset ?? null;
@@ -532,6 +548,127 @@ export function VideoAdEditor() {
       .reduce((sum, clip) => sum + Math.max(1, Math.round(clip.asset.metadata.duration * previewFps)), 0);
     setCurrentFrame(startFrame);
     requestAnimationFrame(() => playerRef.current?.seekTo(startFrame));
+  };
+
+  const reorderClip = (sourceId: string, targetId: string) => {
+    if (sourceId === targetId) return;
+    setClips((current) => {
+      const sourceIndex = current.findIndex((clip) => clip.id === sourceId);
+      const targetIndex = current.findIndex((clip) => clip.id === targetId);
+      if (sourceIndex < 0 || targetIndex < 0) return current;
+      const next = [...current];
+      const [moved] = next.splice(sourceIndex, 1);
+      next.splice(targetIndex, 0, moved);
+      return next;
+    });
+    setSelectedClipId(sourceId);
+    currentFrameRef.current = 0;
+    setCurrentFrame(0);
+    requestAnimationFrame(() => playerRef.current?.seekTo(0));
+  };
+
+  const getTimelineSnapTargets = (track: EditableTimelineTrack, id: string) => {
+    const clipBoundaries = [0, totalClipDuration];
+    clipStartFrames.forEach((frame, index) => {
+      clipBoundaries.push(frame / previewFps);
+      clipBoundaries.push((frame + (clipFrameCounts[index] ?? 0)) / previewFps);
+    });
+    const otherRanges: Array<TextItem | GraphicItem> = [...items, ...graphics];
+    otherRanges.forEach((item) => {
+      if (item.id === id) return;
+      clipBoundaries.push(item.start, item.end);
+    });
+    return [...new Set(clipBoundaries.map((time) => Number(time.toFixed(6))))];
+  };
+
+  const beginTimelineDrag = (
+    event: React.PointerEvent<HTMLElement>,
+    track: EditableTimelineTrack,
+    id: string,
+    mode: TimelineDragMode,
+    start: number,
+    end: number,
+  ) => {
+    const lane = event.currentTarget.closest(`.${styles.trackLane}`) as HTMLElement | null;
+    if (!lane) return;
+    event.preventDefault();
+    event.stopPropagation();
+    playerRef.current?.pause();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    timelineDragRef.current = {
+      pointerId: event.pointerId,
+      track,
+      id,
+      mode,
+      originX: event.clientX,
+      laneWidth: lane.getBoundingClientRect().width,
+      start,
+      end,
+    };
+  };
+
+  const moveTimelineDrag = (event: React.PointerEvent<HTMLElement>) => {
+    const drag = timelineDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || totalClipDuration <= 0) return;
+    const minimumDuration = 1 / previewFps;
+    const delta = (event.clientX - drag.originX) / Math.max(1, drag.laneWidth) * totalClipDuration;
+    const targets = getTimelineSnapTargets(drag.track, drag.id);
+    const snapThreshold = Math.max(minimumDuration, totalClipDuration * 7 / Math.max(1, drag.laneWidth));
+    let start = drag.start;
+    let end = drag.end;
+    let guide: number | null = null;
+
+    const closestSnap = (value: number) => targets
+      .map((target) => ({ target, distance: Math.abs(target - value) }))
+      .sort((a, b) => a.distance - b.distance)[0];
+
+    if (drag.mode === "move") {
+      const span = drag.end - drag.start;
+      start = Math.max(0, Math.min(drag.start + delta, totalClipDuration - span));
+      end = start + span;
+      const startSnap = closestSnap(start);
+      const endSnap = closestSnap(end);
+      const snap = startSnap.distance <= endSnap.distance ? startSnap : endSnap;
+      if (snap.distance <= snapThreshold) {
+        const anchor = snap === startSnap ? start : end;
+        const shift = snap.target - anchor;
+        start += shift;
+        end += shift;
+        guide = snap.target;
+      }
+    } else if (drag.mode === "resize-start") {
+      start = Math.max(0, Math.min(drag.start + delta, end - minimumDuration));
+      const snap = closestSnap(start);
+      if (snap.distance <= snapThreshold && snap.target <= end - minimumDuration) {
+        start = snap.target;
+        guide = snap.target;
+      }
+    } else {
+      end = Math.min(totalClipDuration, Math.max(drag.end + delta, start + minimumDuration));
+      const snap = closestSnap(end);
+      if (snap.distance <= snapThreshold && snap.target >= start + minimumDuration) {
+        end = snap.target;
+        guide = snap.target;
+      }
+    }
+
+    const updateRange = <T extends TextItem | GraphicItem>(item: T): T => (
+      item.id === drag.id ? { ...item, start, end } : item
+    );
+    if (drag.track === "text") setItems((current) => current.map(updateRange));
+    else setGraphics((current) => current.map(updateRange));
+    setSnapGuide(guide);
+    seekToTextPreview(start, end);
+  };
+
+  const endTimelineDrag = (event: React.PointerEvent<HTMLElement>) => {
+    const drag = timelineDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    timelineDragRef.current = null;
+    setSnapGuide(null);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
   };
 
   const removeClip = (clipId: string) => {
@@ -1153,11 +1290,12 @@ export function VideoAdEditor() {
               <div className={styles.timelinePanel}>
                 <div className={styles.timelineHeader}>
                   <div><Layers3 size={15} /><strong>타임라인</strong></div>
-                  <span>{asset ? `${currentFrame + 1} / ${sequenceDurationInFrames} 프레임` : "레이어가 여기에 표시됩니다"}</span>
+                  <span>{asset ? `스냅 ON · ${currentFrame + 1} / ${sequenceDurationInFrames} 프레임` : "레이어가 여기에 표시됩니다"}</span>
                 </div>
                 <div className={styles.timelineRuler}>
                   <span>0초</span><span>{totalClipDuration ? `${(totalClipDuration / 2).toFixed(1)}초` : "—"}</span><span>{totalClipDuration ? `${totalClipDuration.toFixed(1)}초` : "—"}</span>
                 </div>
+                {clips.length > 0 && <p className={styles.timelineHint}>영상 바 드래그: 순서 변경 · 텍스트/이미지 가운데: 이동 · 양끝: 길이 조절 · 경계 자동 스냅</p>}
                 {clips.length > 0 && (
                   <div className={styles.sequenceTimeline}>
                     <span className={styles.trackLabel}><Film size={14} /> 전체 컷</span>
@@ -1166,10 +1304,27 @@ export function VideoAdEditor() {
                         <button
                           type="button"
                           key={clip.id}
+                          draggable
                           className={clip.id === selectedClipId ? styles.selectedSequenceClip : ""}
                           style={{ width: `${clip.asset.metadata.duration / totalClipDuration * 100}%` }}
                           onClick={() => selectClip(clip.id)}
-                          title={clip.asset.originalName}
+                          onDragStart={(event) => {
+                            draggedClipIdRef.current = clip.id;
+                            event.dataTransfer.effectAllowed = "move";
+                            event.dataTransfer.setData("text/plain", clip.id);
+                          }}
+                          onDragOver={(event) => {
+                            event.preventDefault();
+                            event.dataTransfer.dropEffect = "move";
+                          }}
+                          onDrop={(event) => {
+                            event.preventDefault();
+                            const sourceId = draggedClipIdRef.current || event.dataTransfer.getData("text/plain");
+                            if (sourceId) reorderClip(sourceId, clip.id);
+                            draggedClipIdRef.current = null;
+                          }}
+                          onDragEnd={() => { draggedClipIdRef.current = null; }}
+                          title={`${clip.asset.originalName} · 드래그해서 순서 변경`}
                         >
                           {index + 1}
                         </button>
@@ -1186,16 +1341,50 @@ export function VideoAdEditor() {
                     <div className={styles.timelineRow} key={key}>
                       <span className={styles.trackLabel}><TrackIcon size={14} /> {label}</span>
                       <div className={styles.trackLane}>
-                        {timelineSegments[key].map((segment, index) => (
-                          <span
-                            className={`${styles.timelineClip} ${styles[`timelineClip${key}`]}`}
-                            key={segment.id}
-                            style={{
-                              left: `${totalClipDuration ? Math.max(0, segment.start / totalClipDuration * 100) : 0}%`,
-                              width: `${totalClipDuration ? Math.max(1.5, (segment.end - segment.start) / totalClipDuration * 100) : 0}%`,
-                            }}
-                          >{key === "video" ? "원본 영상" : `${label} ${index + 1}`}</span>
-                        ))}
+                        {timelineSegments[key].map((segment, index) => {
+                          const editableTrack = key === "text" || key === "image" ? key : null;
+                          const segmentStyle = {
+                            left: `${totalClipDuration ? Math.max(0, segment.start / totalClipDuration * 100) : 0}%`,
+                            width: `${totalClipDuration ? Math.max(1.5, (segment.end - segment.start) / totalClipDuration * 100) : 0}%`,
+                          };
+                          if (!editableTrack) {
+                            return <span className={`${styles.timelineClip} ${styles[`timelineClip${key}`]}`} key={segment.id} style={segmentStyle}>{key === "video" ? `컷 ${index + 1}` : `${label} ${index + 1}`}</span>;
+                          }
+                          return (
+                            <div
+                              className={`${styles.timelineClip} ${styles.timelineClipEditable} ${styles[`timelineClip${key}`]}`}
+                              key={segment.id}
+                              style={segmentStyle}
+                              role="slider"
+                              tabIndex={0}
+                              aria-label={`${label} ${index + 1} · ${segment.start.toFixed(2)}초부터 ${segment.end.toFixed(2)}초`}
+                              onPointerDown={(event) => beginTimelineDrag(event, editableTrack, segment.id, "move", segment.start, segment.end)}
+                              onPointerMove={moveTimelineDrag}
+                              onPointerUp={endTimelineDrag}
+                              onPointerCancel={endTimelineDrag}
+                              title="가운데를 드래그해 이동 · 양끝을 드래그해 길이 조절"
+                            >
+                              <span
+                                className={`${styles.timelineResizeHandle} ${styles.timelineResizeStart}`}
+                                onPointerDown={(event) => beginTimelineDrag(event, editableTrack, segment.id, "resize-start", segment.start, segment.end)}
+                                onPointerMove={moveTimelineDrag}
+                                onPointerUp={endTimelineDrag}
+                                onPointerCancel={endTimelineDrag}
+                              />
+                              <span className={styles.timelineClipLabel}>{label} {index + 1}</span>
+                              <span
+                                className={`${styles.timelineResizeHandle} ${styles.timelineResizeEnd}`}
+                                onPointerDown={(event) => beginTimelineDrag(event, editableTrack, segment.id, "resize-end", segment.start, segment.end)}
+                                onPointerMove={moveTimelineDrag}
+                                onPointerUp={endTimelineDrag}
+                                onPointerCancel={endTimelineDrag}
+                              />
+                            </div>
+                          );
+                        })}
+                        {snapGuide !== null && (
+                          <span className={styles.snapGuide} style={{ left: `${snapGuide / totalClipDuration * 100}%` }} />
+                        )}
                         {asset && <span className={styles.playhead} style={{ left: `${Math.min(100, currentFrame / Math.max(1, sequenceDurationInFrames - 1) * 100)}%` }} />}
                       </div>
                     </div>

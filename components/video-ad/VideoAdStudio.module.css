@@ -271,25 +271,38 @@
 .timelineRuler { display: grid; grid-template-columns: repeat(3, 1fr); margin-left: 76px; color: #596276; font-size: 7px; }
 .timelineRuler span:nth-child(2) { text-align: center; }
 .timelineRuler span:last-child { text-align: right; }
+.timelineHint { margin: 4px 0 6px 76px; color: #667084; font-size: 7px; line-height: 1.35; }
 .timelineBody { display: flex; flex-direction: column; gap: 5px; margin-top: 5px; }
 .sequenceTimeline { min-width: 0; display: grid; grid-template-columns: 68px minmax(0, 1fr); align-items: center; gap: 8px; margin: 5px 0 6px; }
 .sequenceLane { position: relative; height: 27px; display: flex; gap: 2px; overflow: hidden; border: 1px solid #303748; border-radius: 6px; background: #10151e; }
 .sequenceLane button { min-width: 18px; height: 100%; overflow: hidden; border: 0; border-right: 1px solid rgba(255,255,255,.12); color: #cbd5eb; background: #315ca2; font-size: 7px; font-weight: 800; cursor: pointer; }
 .sequenceLane button:nth-child(even) { background: #416cb0; }
 .sequenceLane button:hover { filter: brightness(1.18); }
+.sequenceLane button:active { cursor: grabbing; }
 .sequenceLane button.selectedSequenceClip { color: #fff; background: #7359d3; box-shadow: inset 0 0 0 1px #b3a4ff; }
 .sequencePlayhead { position: absolute; z-index: 4; top: 0; bottom: 0; width: 1px; background: #ff6686; pointer-events: none; }
 .sequencePlayhead::before { content: ""; position: absolute; top: 0; left: -2px; width: 5px; height: 5px; border-radius: 0 0 2px 2px; background: #ff6686; }
 .timelineRow { min-width: 0; display: grid; grid-template-columns: 68px minmax(0, 1fr); align-items: center; gap: 8px; }
 .trackLabel { display: flex; align-items: center; gap: 5px; color: #778195; font-size: 8px; }
-.trackLane { position: relative; height: 22px; overflow: hidden; border: 1px solid #242a37; border-radius: 5px; background: #111620; }
+.trackLane { position: relative; height: 27px; overflow: hidden; border: 1px solid #242a37; border-radius: 5px; background: #111620; }
 .timelineClip { position: absolute; top: 3px; bottom: 3px; min-width: 3px; overflow: hidden; border-radius: 3px; padding: 2px 5px; color: rgba(255,255,255,.85); font-size: 7px; line-height: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.timelineClipEditable { z-index: 2; display: flex; align-items: center; justify-content: center; padding: 2px 8px; cursor: grab; touch-action: none; user-select: none; outline: none; }
+.timelineClipEditable:active { cursor: grabbing; }
+.timelineClipEditable:focus-visible { box-shadow: inset 0 0 0 2px #c5baff; }
+.timelineClipEditable:hover { filter: brightness(1.14); }
+.timelineClipLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.timelineResizeHandle { position: absolute; z-index: 3; top: 0; bottom: 0; width: 7px; background: rgba(255,255,255,.3); cursor: ew-resize; touch-action: none; }
+.timelineResizeHandle:hover { background: rgba(255,255,255,.72); }
+.timelineResizeStart { left: 0; border-radius: 3px 0 0 3px; }
+.timelineResizeEnd { right: 0; border-radius: 0 3px 3px 0; }
 .timelineClipvideo { background: #315ca2; }
 .timelineClipimage { background: #7251b1; }
 .timelineCliptext { background: #9a527f; }
 .timelineClipeffect { background: #8d6333; }
 .playhead { position: absolute; z-index: 5; top: 0; bottom: 0; width: 1px; background: #ff6686; pointer-events: none; }
 .playhead::before { content: ""; position: absolute; top: -1px; left: -3px; width: 7px; height: 5px; border-radius: 2px; background: #ff6686; }
+.snapGuide { position: absolute; z-index: 6; top: 0; bottom: 0; width: 1px; background: #69d5ff; box-shadow: 0 0 0 1px rgba(105,213,255,.2); pointer-events: none; }
+.snapGuide::before { content: ""; position: absolute; top: 0; left: -2px; width: 5px; height: 5px; border-radius: 50%; background: #b6efff; }
 .timelineScrubber { position: absolute; inset: 35px 12px auto 88px; width: calc(100% - 100px); height: 10px; opacity: 0; cursor: ew-resize; }
 
 .settingsSummary { display: none; list-style: none; }

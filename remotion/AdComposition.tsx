@@ -5,12 +5,14 @@ import {
   delayRender,
   Easing,
   interpolate,
+  Html5Video,
   Img,
   OffthreadVideo,
   Sequence,
   spring,
   staticFile,
   useCurrentFrame,
+  useRemotionEnvironment,
   useVideoConfig,
 } from "remotion";
 import {
@@ -187,17 +189,19 @@ const VideoAdClip: React.FC<Pick<VideoAdCompositionProps, "videoSrc" | "items" |
   graphics,
   aspectMode,
 }) => {
+  const { isPlayer } = useRemotionEnvironment();
+  const videoStyle: React.CSSProperties = {
+    width: "100%",
+    height: "100%",
+    objectFit: aspectMode === "cover" ? "cover" : "contain",
+  };
   return (
     <AbsoluteFill style={{ backgroundColor: "#000000", overflow: "hidden" }}>
-      <OffthreadVideo
-        src={videoSrc}
-        pauseWhenBuffering
-        style={{
-          width: "100%",
-          height: "100%",
-          objectFit: aspectMode === "cover" ? "cover" : "contain",
-        }}
-      />
+      {isPlayer ? (
+        <Html5Video src={videoSrc} pauseWhenBuffering preload="auto" style={videoStyle} />
+      ) : (
+        <OffthreadVideo src={videoSrc} pauseWhenBuffering style={videoStyle} />
+      )}
       {graphics.map((item) => (
         <AnimatedGraphic key={item.id} item={item} />
       ))}
@@ -221,7 +225,6 @@ export const VideoAdSequenceComposition: React.FC<VideoAdSequenceCompositionProp
   graphics,
   aspectMode,
 }) => {
-  const { fps } = useVideoConfig();
   let from = 0;
 
   return (
@@ -236,7 +239,7 @@ export const VideoAdSequenceComposition: React.FC<VideoAdSequenceCompositionProp
             key={clip.id}
             from={sequenceFrom}
             durationInFrames={durationInFrames}
-            premountFor={sequenceFrom === 0 ? 0 : Math.round(fps)}
+            premountFor={sequenceFrom}
           >
             <VideoAdClip
               videoSrc={clip.videoSrc}

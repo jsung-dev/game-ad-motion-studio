@@ -5,7 +5,8 @@ import path from "node:path";
 import { bundle } from "@remotion/bundler";
 import { addBundleToSandbox, createSandbox, getRenderProgress, renderMediaOnVercel } from "@remotion/vercel";
 import { Sandbox } from "@vercel/sandbox";
-import { CLOUD_VIDEO_BUCKET, createCloudReadUrl, getCloudStorage } from "./cloud-storage";
+import { get, put } from "@vercel/blob";
+import { createCloudReadUrl } from "./cloud-storage";
 import { OUTPUT_FPS, type RenderJobStatus, type VideoAdSequenceCompositionProps } from "./types";
 import type { SequenceRenderClip } from "./server-validation";
 import type { AspectMode, GraphicItem, OutputRatio, TextItem } from "./types";
@@ -40,25 +41,26 @@ export const isCloudRenderEnabled = () => Boolean(
 );
 
 export const writeCloudRenderJob = async (job: CloudRenderJob) => {
-  const bytes = new TextEncoder().encode(JSON.stringify(job));
-  const { error } = await getCloudStorage().storage
-    .from(CLOUD_VIDEO_BUCKET)
-    .upload(jobPath(job.id), bytes, {
-      contentType: "application/json",
-      cacheControl: "0",
-      upsert: true,
-    });
-  if (error) throw error;
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!token) throw new Error("Vercel Blob 저장소 연결이 필요합니다.");
+  await put(jobPath(job.id), JSON.stringify(job), {
+    access: "private",
+    token,
+    contentType: "application/json",
+    addRandomSuffix: false,
+    allowOverwrite: true,
+    cacheControlMaxAge: 0,
+  });
 };
 
 export const readCloudRenderJob = async (id: string): Promise<CloudRenderJob | null> => {
   if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
-  const { data, error } = await getCloudStorage().storage
-    .from(CLOUD_VIDEO_BUCKET)
-    .download(jobPath(id));
-  if (error || !data) return null;
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!token) return null;
   try {
-    return JSON.parse(await data.text()) as CloudRenderJob;
+    const result = await get(jobPath(id), { access: "private", token, useCache: false });
+    if (!result || result.statusCode !== 200) return null;
+    return JSON.parse(await new Response(result.stream).text()) as CloudRenderJob;
   } catch {
     return null;
   }

@@ -192,6 +192,7 @@ const VideoAdClip: React.FC<Pick<VideoAdCompositionProps, "videoSrc" | "items" |
     <AbsoluteFill style={{ backgroundColor: "#000000", overflow: "hidden" }}>
       <OffthreadVideo
         src={videoSrc}
+        pauseWhenBuffering
         style={{
           width: "100%",
           height: "100%",
@@ -229,7 +230,12 @@ export const VideoAdSequenceComposition: React.FC<VideoAdSequenceCompositionProp
         const sequenceFrom = from;
         from += durationInFrames;
         return (
-          <Sequence key={clip.id} from={sequenceFrom} durationInFrames={durationInFrames}>
+          <Sequence
+            key={clip.id}
+            from={sequenceFrom}
+            durationInFrames={durationInFrames}
+            premountFor={sequenceFrom === 0 ? 0 : OUTPUT_FPS}
+          >
             <VideoAdClip
               videoSrc={clip.videoSrc}
               items={clip.items}

@@ -715,6 +715,7 @@ export function VideoAdEditor() {
                 <div className={styles.assetInfo}>
                   <strong title={asset.originalName}>{asset.originalName}</strong>
                   <span>선택 컷 {selectedClipIndex + 1} · 버전 {selectedClip.version} · {asset.metadata.duration.toFixed(2)}초</span>
+                  <span>{asset.metadata.width}×{asset.metadata.height} · 원본 {asset.metadata.fps.toFixed(2)}fps</span>
                   <span>{assetFileSize ? `${(assetFileSize / 1024 / 1024).toFixed(1)}MB · ` : ""}{asset.metadata.hasAudio ? "오디오 있음" : "무음 영상"}</span>
                 </div>
                 <button type="button" className={styles.assetRemove} aria-label="선택 컷 삭제" onClick={() => removeClip(selectedClip.id)}><Trash2 size={15} /></button>
@@ -740,7 +741,7 @@ export function VideoAdEditor() {
                       <span className={styles.clipNumber}>{index + 1}</span>
                       <div>
                         <strong title={clip.asset.originalName}>{clip.asset.originalName}</strong>
-                        <small>{clip.asset.metadata.duration.toFixed(2)}초 · 레이어 {clip.items.length + clip.graphics.length}개</small>
+                        <small>{clip.asset.metadata.duration.toFixed(2)}초 · {clip.asset.metadata.fps.toFixed(1)}fps · 레이어 {clip.items.length + clip.graphics.length}개</small>
                       </div>
                       <div className={styles.clipCardActions}>
                         <button type="button" title="앞으로 이동" disabled={index === 0} onClick={(event) => { event.stopPropagation(); moveClip(clip.id, -1); }}><ChevronLeft size={13} /></button>

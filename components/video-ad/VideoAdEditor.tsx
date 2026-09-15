@@ -115,6 +115,7 @@ const estimateOverflow = (item: TextItem) => {
 type GraphicPlacementPreviewProps = {
   item: GraphicItem;
   videoSrc: string;
+  playbackActive: boolean;
   aspectMode: AspectMode;
   width: number;
   height: number;
@@ -125,6 +126,7 @@ type GraphicPlacementPreviewProps = {
 function GraphicPlacementPreview({
   item,
   videoSrc,
+  playbackActive,
   aspectMode,
   width,
   height,
@@ -169,7 +171,11 @@ function GraphicPlacementPreview({
             }
           }}
         >
-          <video src={videoSrc} muted playsInline preload="auto" onLoadedData={(event) => { event.currentTarget.currentTime = Math.min(0.1, event.currentTarget.duration || 0.1); }} style={{ objectFit: aspectMode === "cover" ? "cover" : "contain" }} />
+          {playbackActive ? (
+            <span className={styles.decoderPausedPlaceholder}><Film size={18} /></span>
+          ) : (
+            <video src={videoSrc} muted playsInline preload="metadata" onLoadedData={(event) => { event.currentTarget.currentTime = Math.min(0.1, event.currentTarget.duration || 0.1); }} style={{ objectFit: aspectMode === "cover" ? "cover" : "contain" }} />
+          )}
           <div
             className={styles.placementPreviewGraphic}
             style={{
@@ -212,6 +218,7 @@ export function VideoAdEditor() {
   const replaceTargetRef = useRef<string | null>(null);
   const graphicInputRef = useRef<HTMLInputElement>(null);
   const playerRef = useRef<PlayerRef>(null);
+  const currentFrameRef = useRef(0);
   const previewSectionRef = useRef<HTMLElement>(null);
   const [clips, setClips] = useState<EditorClip[]>([]);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
@@ -236,9 +243,16 @@ export function VideoAdEditor() {
   const selectedClipIndex = selectedClip
     ? clips.findIndex((clip) => clip.id === selectedClip.id)
     : -1;
+  const previewFps = useMemo(() => {
+    const sourceRates = clips
+      .map((clip) => clip.asset.metadata.fps)
+      .filter((fps) => Number.isFinite(fps) && fps > 0);
+    if (!sourceRates.length) return OUTPUT_FPS;
+    return Math.max(12, Math.min(60, Math.round(Math.min(...sourceRates))));
+  }, [clips]);
   const clipFrameCounts = useMemo(
-    () => clips.map((clip) => getDurationInFrames(clip.asset.metadata.duration)),
-    [clips],
+    () => clips.map((clip) => Math.max(1, Math.round(clip.asset.metadata.duration * previewFps))),
+    [clips, previewFps],
   );
   const clipStartFrames = useMemo(() => {
     let cursor = 0;
@@ -249,22 +263,28 @@ export function VideoAdEditor() {
     });
   }, [clipFrameCounts]);
   const sequenceDurationInFrames = Math.max(1, clipFrameCounts.reduce((sum, frames) => sum + frames, 0));
-  const totalClipDuration = clips.length ? sequenceDurationInFrames / OUTPUT_FPS : 0;
+  const totalClipDuration = clips.length ? sequenceDurationInFrames / previewFps : 0;
   const hasSequenceAudio = clips.some((clip) => clip.asset.metadata.hasAudio);
   const selectedClipStartFrame = selectedClipIndex >= 0 ? clipStartFrames[selectedClipIndex] ?? 0 : 0;
   const selectedDurationInFrames = selectedClipIndex >= 0 ? clipFrameCounts[selectedClipIndex] ?? 1 : 1;
   const localCurrentFrame = Math.max(0, Math.min(selectedDurationInFrames - 1, currentFrame - selectedClipStartFrame));
-  const sequenceCurrentTime = currentFrame / OUTPUT_FPS;
-  const previewClips = useMemo<VideoAdSequenceClip[]>(() => clips.map((clip) => ({
+  const sequenceCurrentTime = currentFrame / previewFps;
+  const previewClips = useMemo<VideoAdSequenceClip[]>(() => clips.map((clip, index) => ({
     id: clip.id,
     videoSrc: clip.asset.sourceUrl,
     metadata: clip.asset.metadata,
+    durationInFrames: clipFrameCounts[index],
     items: clip.items,
     graphics: clip.graphics,
-  })), [clips]);
+  })), [clipFrameCounts, clips]);
+  const previewInputProps = useMemo(() => ({
+    clips: previewClips,
+    aspectMode,
+    outputRatio,
+  }), [aspectMode, outputRatio, previewClips]);
   const sequencePlayerKey = useMemo(
-    () => `${outputRatio}:${clips.map((clip) => `${clip.id}:${clip.asset.id}`).join("|")}`,
-    [clips, outputRatio],
+    () => `${outputRatio}:${previewFps}:${clips.map((clip) => `${clip.id}:${clip.asset.id}`).join("|")}`,
+    [clips, outputRatio, previewFps],
   );
 
   const setItems = useCallback((action: React.SetStateAction<TextItem[]>) => {
@@ -346,7 +366,13 @@ export function VideoAdEditor() {
     if (!player || !clips.length) return;
     const onFrameUpdate = (event: { detail: { frame: number } }) => {
       const frame = event.detail.frame;
-      setCurrentFrame(frame);
+      currentFrameRef.current = frame;
+      const isBoundary = frame === 0 ||
+        frame === sequenceDurationInFrames - 1 ||
+        clipStartFrames.includes(frame);
+      if (isBoundary || frame % 3 === 0) {
+        setCurrentFrame(frame);
+      }
       let activeIndex = 0;
       for (let index = clipStartFrames.length - 1; index >= 0; index -= 1) {
         if (frame >= clipStartFrames[index]) {
@@ -360,8 +386,18 @@ export function VideoAdEditor() {
       }
     };
     const onPlay = () => setIsPlaying(true);
-    const onPause = () => setIsPlaying(false);
-    const onEnded = () => setIsPlaying(false);
+    const onPause = () => {
+      const frame = player.getCurrentFrame();
+      currentFrameRef.current = frame;
+      setCurrentFrame(frame);
+      setIsPlaying(false);
+    };
+    const onEnded = () => {
+      const frame = player.getCurrentFrame();
+      currentFrameRef.current = frame;
+      setCurrentFrame(frame);
+      setIsPlaying(false);
+    };
     const onMuteChange = (event: { detail: { isMuted: boolean } }) => setIsMuted(event.detail.isMuted);
     player.addEventListener("frameupdate", onFrameUpdate);
     player.addEventListener("play", onPlay);
@@ -369,6 +405,7 @@ export function VideoAdEditor() {
     player.addEventListener("ended", onEnded);
     player.addEventListener("mutechange", onMuteChange);
     setCurrentFrame(player.getCurrentFrame());
+    currentFrameRef.current = player.getCurrentFrame();
     setIsPlaying(player.isPlaying());
     setIsMuted(player.isMuted());
     return () => {
@@ -378,7 +415,7 @@ export function VideoAdEditor() {
       player.removeEventListener("ended", onEnded);
       player.removeEventListener("mutechange", onMuteChange);
     };
-  }, [clipStartFrames, clips, outputRatio, sequencePlayerKey]);
+  }, [clipStartFrames, clips, outputRatio, sequenceDurationInFrames, sequencePlayerKey]);
 
   const uploadAsset = async (file: File) => {
     if (!file.name.toLowerCase().endsWith(".mp4")) {
@@ -476,7 +513,7 @@ export function VideoAdEditor() {
     setClips(next);
     const selectedIndex = next.findIndex((clip) => clip.id === selectedClipId);
     const startFrame = next.slice(0, Math.max(0, selectedIndex))
-      .reduce((sum, clip) => sum + getDurationInFrames(clip.asset.metadata.duration), 0);
+      .reduce((sum, clip) => sum + Math.max(1, Math.round(clip.asset.metadata.duration * previewFps)), 0);
     setCurrentFrame(startFrame);
     requestAnimationFrame(() => playerRef.current?.seekTo(startFrame));
   };
@@ -491,7 +528,7 @@ export function VideoAdEditor() {
     setSelectedClipId(nextSelectedId);
     const nextSelectedIndex = next.findIndex((clip) => clip.id === nextSelectedId);
     const startFrame = next.slice(0, Math.max(0, nextSelectedIndex))
-      .reduce((sum, clip) => sum + getDurationInFrames(clip.asset.metadata.duration), 0);
+      .reduce((sum, clip) => sum + Math.max(1, Math.round(clip.asset.metadata.duration * previewFps)), 0);
     setCurrentFrame(startFrame);
     requestAnimationFrame(() => playerRef.current?.seekTo(startFrame));
   };
@@ -711,7 +748,11 @@ export function VideoAdEditor() {
             {uploadError && <p className={styles.errorBox}>{uploadError}</p>}
             {selectedClip && asset && (
               <div className={styles.assetCard}>
-                <video className={styles.assetThumbnail} src={asset.sourceUrl} muted playsInline preload="metadata" />
+                {isPlaying ? (
+                  <span className={styles.assetThumbnailPlaceholder}><Film size={18} /></span>
+                ) : (
+                  <video className={styles.assetThumbnail} src={asset.sourceUrl} muted playsInline preload="metadata" />
+                )}
                 <div className={styles.assetInfo}>
                   <strong title={asset.originalName}>{asset.originalName}</strong>
                   <span>선택 컷 {selectedClipIndex + 1} · 버전 {selectedClip.version} · {asset.metadata.duration.toFixed(2)}초</span>
@@ -737,7 +778,11 @@ export function VideoAdEditor() {
                       className={clip.id === selectedClipId ? styles.selectedClipCard : ""}
                       onClick={() => selectClip(clip.id)}
                     >
-                      <video src={clip.asset.sourceUrl} muted playsInline preload="metadata" />
+                      {isPlaying ? (
+                        <span className={styles.clipThumbnailPlaceholder}><Film size={15} /></span>
+                      ) : (
+                        <video src={clip.asset.sourceUrl} muted playsInline preload="metadata" />
+                      )}
                       <span className={styles.clipNumber}>{index + 1}</span>
                       <div>
                         <strong title={clip.asset.originalName}>{clip.asset.originalName}</strong>
@@ -870,6 +915,7 @@ export function VideoAdEditor() {
                     <GraphicPlacementPreview
                       item={item}
                       videoSrc={asset!.sourceUrl}
+                      playbackActive={isPlaying}
                       aspectMode={aspectMode}
                       width={outputDimensions.width}
                       height={outputDimensions.height}
@@ -907,7 +953,7 @@ export function VideoAdEditor() {
             <section className={styles.canvasPanel} ref={previewSectionRef}>
               <div className={styles.previewHeading}>
                 <div><span className={styles.liveDot} /> {selectedClip ? `컷 ${selectedClipIndex + 1}/${clips.length}` : "컴포지션"} 미리보기</div>
-                <span>{outputDimensions.width} × {outputDimensions.height} · {OUTPUT_FPS}fps · 전체 {totalClipDuration.toFixed(2)}초</span>
+                <span>{outputDimensions.width} × {outputDimensions.height} · 미리보기 {previewFps}fps · 출력 {OUTPUT_FPS}fps · 전체 {totalClipDuration.toFixed(2)}초</span>
               </div>
               <div className={styles.canvasSurface}>
                 <div className={styles.playerShell} style={{ aspectRatio: `${outputDimensions.width} / ${outputDimensions.height}` }}>
@@ -916,11 +962,11 @@ export function VideoAdEditor() {
                       ref={playerRef}
                       key={sequencePlayerKey}
                       component={VideoAdSequenceComposition}
-                      inputProps={{ clips: previewClips, aspectMode, outputRatio }}
+                      inputProps={previewInputProps}
                       durationInFrames={sequenceDurationInFrames}
                       compositionWidth={outputDimensions.width}
                       compositionHeight={outputDimensions.height}
-                      fps={OUTPUT_FPS}
+                      fps={previewFps}
                       controls={false}
                       loop={false}
                       moveToBeginningWhenEnded={false}
@@ -937,11 +983,11 @@ export function VideoAdEditor() {
               </div>
 
               <div className={styles.transport}>
-                <span className={styles.timecode}>{formatTime(currentFrame / OUTPUT_FPS)}</span>
+                <span className={styles.timecode}>{formatTime(currentFrame / previewFps)}</span>
                 <div className={styles.transportButtons}>
-                  <button type="button" aria-label="이전 프레임" disabled={!asset} onClick={() => playerRef.current?.seekTo(Math.max(0, currentFrame - 1))}><SkipBack size={16} /></button>
+                  <button type="button" aria-label="이전 프레임" disabled={!asset} onClick={() => playerRef.current?.seekTo(Math.max(0, currentFrameRef.current - 1))}><SkipBack size={16} /></button>
                   <button type="button" className={styles.playButton} aria-label={isPlaying ? "일시정지" : "재생"} disabled={!asset} onClick={(event) => playerRef.current?.toggle(event)}>{isPlaying ? <Pause size={17} /> : <Play size={17} />}</button>
-                  <button type="button" aria-label="다음 프레임" disabled={!asset} onClick={() => playerRef.current?.seekTo(Math.min(sequenceDurationInFrames - 1, currentFrame + 1))}><SkipForward size={16} /></button>
+                  <button type="button" aria-label="다음 프레임" disabled={!asset} onClick={() => playerRef.current?.seekTo(Math.min(sequenceDurationInFrames - 1, currentFrameRef.current + 1))}><SkipForward size={16} /></button>
                 </div>
                 <div className={styles.transportUtility}>
                   <button type="button" aria-label={isMuted ? "음소거 해제" : "음소거"} disabled={!asset || !hasSequenceAudio} onClick={() => { const player = playerRef.current; if (!player) return; if (player.isMuted()) player.unmute(); else player.mute(); }}>{isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button>

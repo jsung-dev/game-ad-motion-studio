@@ -13,7 +13,6 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
-import { getDurationInFrames } from "../lib/video-ad/validation";
 import {
   DEFAULT_OUTPUT_RATIO,
   OUTPUT_FPS,
@@ -220,13 +219,14 @@ export const VideoAdSequenceComposition: React.FC<VideoAdSequenceCompositionProp
   clips,
   aspectMode,
 }) => {
+  const { fps } = useVideoConfig();
   let from = 0;
 
   return (
     <AbsoluteFill style={{ backgroundColor: "#000000", overflow: "hidden" }}>
       <FontLoader />
       {clips.map((clip) => {
-        const durationInFrames = getDurationInFrames(clip.metadata.duration);
+        const durationInFrames = clip.durationInFrames;
         const sequenceFrom = from;
         from += durationInFrames;
         return (
@@ -234,7 +234,7 @@ export const VideoAdSequenceComposition: React.FC<VideoAdSequenceCompositionProp
             key={clip.id}
             from={sequenceFrom}
             durationInFrames={durationInFrames}
-            premountFor={sequenceFrom === 0 ? 0 : OUTPUT_FPS}
+            premountFor={sequenceFrom === 0 ? 0 : Math.round(fps)}
           >
             <VideoAdClip
               videoSrc={clip.videoSrc}

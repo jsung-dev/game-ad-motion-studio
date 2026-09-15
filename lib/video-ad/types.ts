@@ -92,6 +92,7 @@ export type VideoAdSequenceClip = {
   id: string;
   videoSrc: string;
   metadata: VideoMetadata;
+  durationInFrames: number;
   items: TextItem[];
   graphics: GraphicItem[];
 };

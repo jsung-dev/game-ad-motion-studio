@@ -1,5 +1,5 @@
-import { VideoAdEditor } from "@/components/video-ad/VideoAdEditor";
+import { HomeLanding } from "@/components/home/HomeLanding";
 
 export default function HomePage() {
-  return <VideoAdEditor />;
+  return <HomeLanding />;
 }

@@ -248,6 +248,7 @@ export function VideoAdEditor() {
   const replaceInputRef = useRef<HTMLInputElement>(null);
   const replaceTargetRef = useRef<string | null>(null);
   const graphicInputRef = useRef<HTMLInputElement>(null);
+  const referenceImageInputRef = useRef<HTMLInputElement>(null);
   const playerRef = useRef<PlayerRef>(null);
   const currentFrameRef = useRef(0);
   const previewSectionRef = useRef<HTMLElement>(null);
@@ -261,10 +262,13 @@ export function VideoAdEditor() {
   const [outputRatio, setOutputRatio] = useState<OutputRatio>("9:16");
   const [uploading, setUploading] = useState(false);
   const [graphicUploading, setGraphicUploading] = useState(false);
+  const [referenceImageUploading, setReferenceImageUploading] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [graphicError, setGraphicError] = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
+  const [referenceImage, setReferenceImage] = useState<GraphicAsset | null>(null);
+  const [referenceImageError, setReferenceImageError] = useState<string | null>(null);
   const [job, setJob] = useState<JobView | null>(null);
   const [currentFrame, setCurrentFrame] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -435,7 +439,7 @@ export function VideoAdEditor() {
         const next = await readGeneration(generationJob.id);
         if (!cancelled && next) setGenerationJob(next);
       } catch (error) {
-        if (!cancelled) setGenerationError(error instanceof Error ? error.message : "AI ?? ??? ???? ?????.");
+        if (!cancelled) setGenerationError(error instanceof Error ? error.message : "AI \uC0DD\uC131 \uC0C1\uD0DC\uB97C \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.");
       }
     };
     void poll();
@@ -778,7 +782,7 @@ export function VideoAdEditor() {
     const target = targetClipId ? clips.find((clip) => clip.id === targetClipId) : null;
     const prompt = (target?.prompt ?? newClipPrompt).trim();
     if (!prompt) {
-      setGenerationError("??? ??? ??? ???.");
+      setGenerationError("\uC601\uC0C1 \uC124\uBA85\uC744 \uC785\uB825\uD574 \uC8FC\uC138\uC694.");
       return;
     }
     setGenerationError(null);
@@ -794,13 +798,14 @@ export function VideoAdEditor() {
           resolution: generationResolution,
           aspectRatio: seedanceRatios[outputRatio],
           soundEffects: generationSound,
+          imageAssetId: referenceImage?.id ?? null,
         }),
       });
       const created = await responseJson<GenerationView>(response);
       setGenerationJob(created);
       localStorage.setItem(LAST_GENERATION_KEY, created.id);
     } catch (error) {
-      setGenerationError(error instanceof Error ? error.message : "AI ?? ??? ???? ?????.");
+      setGenerationError(error instanceof Error ? error.message : "AI \uC601\uC0C1 \uC0DD\uC131\uC744 \uC2DC\uC791\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.");
     }
   };
   const startSequencePlayback = () => {
@@ -862,6 +867,34 @@ export function VideoAdEditor() {
       if (graphicInputRef.current) graphicInputRef.current.value = "";
     }
   };
+  const uploadReferenceImage = async (file: File) => {
+    setReferenceImageError(null);
+    if (!CLOUD_UPLOADS_ENABLED) {
+      setReferenceImageError("\uC2DC\uC791 \uC774\uBBF8\uC9C0 \uAE30\uB2A5\uC740 Supabase \uC800\uC7A5\uC18C\uAC00 \uC5F0\uACB0\uB41C \uBC30\uD3EC \uD658\uACBD\uC5D0\uC11C \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.");
+      return;
+    }
+    if (!file.name.toLowerCase().endsWith(".png")) {
+      setReferenceImageError("PNG \uD30C\uC77C\uB9CC \uC2DC\uC791 \uC774\uBBF8\uC9C0\uB85C \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.");
+      return;
+    }
+    if (file.size > MAX_GRAPHIC_BYTES) {
+      setReferenceImageError("\uC2DC\uC791 PNG\uB294 \uCD5C\uB300 10MB\uAE4C\uC9C0 \uC5C5\uB85C\uB4DC\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.");
+      return;
+    }
+    setReferenceImageUploading(true);
+    try {
+      const result = await uploadToCloud<{ asset: GraphicAsset }>("graphic", file);
+      setReferenceImage(result.asset);
+    } catch (error) {
+      setReferenceImageError(
+        error instanceof Error ? error.message : "\uC2DC\uC791 \uC774\uBBF8\uC9C0 \uC5C5\uB85C\uB4DC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4.",
+      );
+    } finally {
+      setReferenceImageUploading(false);
+      if (referenceImageInputRef.current) referenceImageInputRef.current.value = "";
+    }
+  };
+
 
   const updateGraphic = <K extends keyof GraphicItem>(id: string, key: K, value: GraphicItem[K]) => {
     setGraphics((current) =>
@@ -1164,6 +1197,63 @@ export function VideoAdEditor() {
                 <span><Sparkles size={14} /> Seedance 2.5 Pro</span>
                 <em>API 크레딧 사용</em>
               </div>
+              <input
+                ref={referenceImageInputRef}
+                className={styles.hiddenInput}
+                type="file"
+                accept="image/png,.png"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void uploadReferenceImage(file);
+                }}
+              />
+              <div className={styles.referenceImage}>
+                <div className={styles.referenceImageMeta}>
+                  {referenceImage ? (
+                    <img
+                      className={styles.referenceImageThumbnail}
+                      src={referenceImage.sourceUrl}
+                      alt={"\uC2DC\uC791 \uC774\uBBF8\uC9C0 \uBBF8\uB9AC\uBCF4\uAE30"}
+                    />
+                  ) : (
+                    <span className={styles.referenceImagePlaceholder}><ImageIcon size={16} /></span>
+                  )}
+                  <div>
+                    <strong>{"\uC2DC\uC791 \uC774\uBBF8\uC9C0"}</strong>
+                    <span>
+                      {referenceImage
+                        ? `${referenceImage.originalName} \u00B7 ${referenceImage.width} \u00D7 ${referenceImage.height}`
+                        : "\uC5C6\uC73C\uBA74 \uD14D\uC2A4\uD2B8\u2192\uC601\uC0C1\uC73C\uB85C \uC0DD\uC131\uD569\uB2C8\uB2E4."}
+                    </span>
+                  </div>
+                </div>
+                {referenceImage ? (
+                  <button
+                    type="button"
+                    className={styles.referenceImageButton}
+                    onClick={() => { setReferenceImage(null); setReferenceImageError(null); }}
+                    disabled={activeGeneration}
+                  >
+                    <Trash2 size={12} /> {"\uC81C\uAC70"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className={styles.referenceImageButton}
+                    onClick={() => referenceImageInputRef.current?.click()}
+                    disabled={activeGeneration || referenceImageUploading || !CLOUD_UPLOADS_ENABLED}
+                  >
+                    {referenceImageUploading ? <LoaderCircle className={styles.spin} size={12} /> : <ImageIcon size={12} />}
+                    {referenceImageUploading ? "\uC5C5\uB85C\uB4DC \uC911" : "\uC2DC\uC791 \uC774\uBBF8\uC9C0 \uCD94\uAC00"}
+                  </button>
+                )}
+              </div>
+              {referenceImageError && <p className={styles.referenceImageError} role="alert">{referenceImageError}</p>}
+              {referenceImage && (
+                <small className={styles.referenceImageHint}>
+                  {"\uC774\uBBF8\uC9C0\uAC00 \uC788\uC73C\uBA74 \uC774\uBBF8\uC9C0\u2192\uC601\uC0C1\uC73C\uB85C \uC0DD\uC131\uB418\uBA70, \uACB0\uACFC \uBE44\uC728\uC740 \uC2DC\uC791 \uC774\uBBF8\uC9C0 \uBE44\uC728\uC744 \uB530\uB985\uB2C8\uB2E4."}
+                </small>
+              )}
               {selectedClip && (
                 <label className={styles.clipPrompt}>
                   <span>선택 컷 재생성 프롬프트</span>

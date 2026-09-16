@@ -16,6 +16,8 @@ export type SeedanceRequest = {
   aspectRatio: SeedanceAspectRatio;
   resolution: SeedanceResolution;
   soundEffects: boolean;
+  /** A temporary, publicly reachable URL for Seedance image-to-video mode. */
+  image?: string;
 };
 
 export type MagnificTask = {
@@ -119,6 +121,7 @@ export const createSeedanceTask = (request: SeedanceRequest) =>
       output_format: "mp4",
       seed: -1,
       enable_safety_checker: true,
+      ...(request.image ? { image: request.image } : {}),
     }),
   });
 

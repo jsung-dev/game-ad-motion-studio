@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
+import { createCloudReadUrl } from "@/lib/video-ad/cloud-storage";
 import { publicGenerationJob, writeGenerationJob, type GenerationJob } from "@/lib/video-ad/generation-state";
 import {
   createSeedanceTask,
@@ -18,6 +19,7 @@ const ratios: SeedanceAspectRatio[] = [
   "film_horizontal_21_9", "widescreen_16_9", "classic_4_3", "square_1_1",
   "traditional_3_4", "social_story_9_16", "film_vertical_9_21",
 ];
+const isSafeId = (value: string) => /^[0-9a-f-]{36}$/i.test(value);
 
 export async function POST(request: Request) {
   try {
@@ -27,6 +29,10 @@ export async function POST(request: Request) {
     const resolution = body.resolution as SeedanceResolution;
     const aspectRatio = body.aspectRatio as SeedanceAspectRatio;
     const targetClipId = typeof body.targetClipId === "string" ? body.targetClipId.slice(0, 100) : null;
+    const imageAssetId = typeof body.imageAssetId === "string" ? body.imageAssetId : null;
+    if (imageAssetId && !isSafeId(imageAssetId)) {
+      return NextResponse.json({ error: "\uC2DC\uC791 \uC774\uBBF8\uC9C0 \uC815\uBCF4\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." }, { status: 400 });
+    }
     if (!prompt || prompt.length > 40000) {
       return NextResponse.json({ error: "영상 설명을 1자 이상 40,000자 이하로 입력해 주세요." }, { status: 400 });
     }
@@ -36,12 +42,17 @@ export async function POST(request: Request) {
     if (!resolutions.includes(resolution) || !ratios.includes(aspectRatio)) {
       return NextResponse.json({ error: "Seedance 출력 설정을 확인해 주세요." }, { status: 400 });
     }
+    const image = imageAssetId ? (await createCloudReadUrl("graphic", imageAssetId, 600) ?? undefined) : undefined;
+    if (imageAssetId && !image) {
+      return NextResponse.json({ error: "\uC2DC\uC791 \uC774\uBBF8\uC9C0\uB97C \uC77D\uC744 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uB2E4\uC2DC \uC5C5\uB85C\uB4DC\uD574 \uC8FC\uC138\uC694." }, { status: 400 });
+    }
     const task = await createSeedanceTask({
       prompt,
       duration,
       resolution,
       aspectRatio,
       soundEffects: body.soundEffects !== false,
+      image,
     });
     const now = new Date().toISOString();
     const job: GenerationJob = {

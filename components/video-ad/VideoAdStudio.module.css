@@ -59,16 +59,75 @@
 
 .workspace {
   display: grid;
-  grid-template-columns: 260px minmax(460px, 1fr) 300px;
-  grid-template-rows: auto auto;
+  grid-template-columns: minmax(280px, 320px) minmax(500px, 1fr) 300px;
+  grid-template-rows: minmax(0, 1fr);
   gap: 12px;
   width: 100%;
+  min-height: calc(100dvh - 64px);
   max-width: 1920px;
   margin: 0 auto;
   padding: 12px;
   align-items: start;
 }
-.editorColumn, .previewColumn, .sticky { display: contents; }
+.editorColumn {
+  grid-column: 1;
+  grid-row: 1;
+  position: sticky;
+  top: 76px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  width: 100%;
+  height: calc(100dvh - 88px);
+  min-height: 0;
+  overflow: hidden;
+}
+.previewColumn, .sticky { display: contents; }
+.toolModeNav {
+  border: 1px solid #2a3040;
+  border-radius: 14px;
+  padding: 11px;
+  background: #10141d;
+  box-shadow: 0 14px 35px rgba(0, 0, 0, .18);
+}
+.toolModeHeading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0 2px 9px; }
+.toolModeHeading strong { color: #edf0f7; font-size: 11px; font-weight: 780; }
+.toolModeHeading span { color: #717b90; font-size: 8px; white-space: nowrap; }
+.toolModeList { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.toolModeList button {
+  min-width: 0;
+  min-height: 66px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid #2d3444;
+  border-radius: 10px;
+  padding: 7px 4px;
+  color: #939cb0;
+  background: #151923;
+  cursor: pointer;
+  text-align: center;
+  transition: transform .16s ease, border-color .16s ease, color .16s ease, background .16s ease;
+}
+.toolModeList button:hover { border-color: #555e76; color: #d8dcea; background: #191e2a; transform: translateY(-1px); }
+.toolModeList button svg { color: #7e89a1; }
+.toolModeList button span { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.toolModeList button strong { overflow: hidden; color: inherit; font-size: 9px; font-weight: 760; text-overflow: ellipsis; white-space: nowrap; }
+.toolModeList button small { overflow: hidden; color: #6f788d; font-size: 7px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+.toolModeList button.toolModeActive { border-color: #7362eb; color: #e8e4ff; background: linear-gradient(145deg, #282046, #1c2134); box-shadow: inset 0 0 0 1px rgba(142, 121, 255, .1); }
+.toolModeList button.toolModeActive svg { color: #baaaff; }
+.toolModeList button.toolModeActive small { color: #b7acdf; }
+.toolPanel {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: #363d50 transparent;
+}
+.toolPanel > [hidden] { display: none !important; }
 .card, .canvasPanel, .renderCard {
   border: 1px solid #252b38;
   border-radius: 14px;
@@ -76,23 +135,8 @@
   box-shadow: 0 14px 35px rgba(0, 0, 0, .18);
 }
 .card, .renderCard { padding: 16px; }
-.generationCard {
-  grid-column: 1;
-  grid-row: 1;
-  position: sticky;
-  top: 76px;
-  max-height: calc(100dvh - 88px);
-  overflow: auto;
-  scrollbar-width: thin;
-  scrollbar-color: #363d50 transparent;
-}
+.generationCard, .uploadCard, .copyCard { min-width: 0; }
 .generationCard .aiGenerator { margin-top: 0; }
-.uploadCard {
-  grid-column: 1;
-  grid-row: 2;
-  min-width: 0;
-}
-.copyCard { grid-column: 2; grid-row: 2; min-width: 0; }
 .canvasPanel {
   grid-column: 2;
   grid-row: 1;
@@ -446,7 +490,7 @@
 
 @media (max-width: 1240px) {
   .header { grid-template-columns: 230px minmax(0, 1fr) auto; }
-  .workspace { grid-template-columns: 230px minmax(430px, 1fr) 280px; }
+  .workspace { grid-template-columns: minmax(252px, 280px) minmax(430px, 1fr) 280px; }
   .itemList { grid-template-columns: 1fr; }
   .quickFieldGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
@@ -454,12 +498,10 @@
 @media (max-width: 1024px) {
   .header { grid-template-columns: 210px minmax(0, 1fr) auto; }
   .saveStatus { display: none; }
-  .workspace { grid-template-columns: 240px minmax(0, 1fr); grid-template-rows: auto auto auto; }
-  .generationCard { grid-column: 1; grid-row: 1; }
-  .uploadCard { grid-column: 1; grid-row: 2 / span 2; }
+  .workspace { grid-template-columns: 252px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .editorColumn { grid-column: 1; grid-row: 1 / span 2; }
   .canvasPanel { grid-column: 2; grid-row: 1; }
   .renderCard { grid-column: 2; grid-row: 2; position: static; max-height: none; overflow: visible; }
-  .copyCard { grid-column: 2; grid-row: 3; }
   .settingsSummary { display: flex; align-items: center; justify-content: space-between; color: #dfe2e9; cursor: pointer; font-size: 11px; font-weight: 720; }
   .settingsSummary span { display: flex; align-items: center; gap: 7px; }
   .renderCard > .sectionTitle { margin-top: 14px; padding-top: 14px; border-top: 1px solid #292f3d; }
@@ -478,13 +520,14 @@
   .projectTitle { display: none; }
   .headerActions { gap: 5px; }
   .headerButton, .headerPrimary { height: 32px; padding: 0 9px; font-size: 0; }
-  .workspace { display: flex; flex-direction: column; gap: 10px; padding: 10px; }
-  .editorColumn, .previewColumn, .sticky { display: contents; }
+  .workspace { display: flex; flex-direction: column; gap: 10px; min-height: 0; padding: 10px; }
+  .editorColumn { order: 2; position: static; display: flex; flex-direction: column; gap: 10px; width: 100%; height: auto; max-height: none; overflow: visible; }
+  .toolModeNav { position: sticky; z-index: 20; top: 68px; }
+  .toolModeHeading span { display: none; }
+  .toolPanel { overflow: visible; padding-right: 0; }
+  .previewColumn, .sticky { display: contents; }
   .canvasPanel { order: 1; width: 100%; min-height: auto; grid-template-rows: 38px minmax(340px, 62vh) 46px 180px; }
-  .generationCard { order: 2; position: static; width: 100%; max-height: none; overflow: visible; }
-  .copyCard { order: 3; width: 100%; }
-  .uploadCard { order: 4; position: static; width: 100%; max-height: none; overflow: visible; }
-  .renderCard { order: 5; width: 100%; }
+  .renderCard { order: 3; width: 100%; }
   .canvasSurface { padding: 12px; }
   .playerShell { height: min(55vh, 500px); }
   .ratioGrid { grid-template-columns: repeat(3, 1fr); }

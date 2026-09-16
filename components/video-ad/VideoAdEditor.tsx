@@ -64,6 +64,8 @@ type TimelineDrag = {
   end: number;
 };
 
+type EditorMode = "video" | "captions" | "generate";
+
 const LAST_JOB_KEY = "video-ad:last-job";
 const LAST_GENERATION_KEY = "video-ad:last-generation";
 const CLOUD_UPLOADS_ENABLED = process.env.NEXT_PUBLIC_VIDEO_STORAGE_MODE === "supabase";
@@ -285,6 +287,7 @@ export function VideoAdEditor() {
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [items, setItems] = useState<TextItem[]>([]);
   const [graphics, setGraphics] = useState<GraphicItem[]>([]);
+  const [activeEditorMode, setActiveEditorMode] = useState<EditorMode>("video");
   const [aspectMode, setAspectMode] = useState<AspectMode>("cover");
   const [outputRatio, setOutputRatio] = useState<OutputRatio>("9:16");
   const [uploading, setUploading] = useState(false);
@@ -1230,7 +1233,53 @@ export function VideoAdEditor() {
 
       <div className={styles.workspace}>
         <section className={styles.editorColumn}>
-          <div className={`${styles.card} ${styles.generationCard}`}>
+          <nav className={styles.toolModeNav} aria-label={"\uD3B8\uC9D1 \uC791\uC5C5 \uB3C4\uAD6C"}>
+            <div className={styles.toolModeHeading}>
+              <strong>{"\uC791\uC5C5 \uB3C4\uAD6C"}</strong>
+              <span>{"\uD544\uC694\uD55C \uC791\uC5C5\uB9CC \uC5F4\uC5B4 \uD3B8\uC9D1\uD558\uC138\uC694."}</span>
+            </div>
+            <div className={styles.toolModeList}>
+              <button
+                type="button"
+                className={activeEditorMode === "video" ? styles.toolModeActive : ""}
+                aria-pressed={activeEditorMode === "video"}
+                aria-controls="editor-panel-video"
+                onClick={() => setActiveEditorMode("video")}
+              >
+                <Film size={16} />
+                <span><strong>{"\uC601\uC0C1"}</strong><small>{clips.length ? clips.length + "\uAC1C \uCEE7 \uD3B8\uC9D1 \uC911" : "\uC0C8 MP4 \uCD94\uAC00"}</small></span>
+              </button>
+              <button
+                type="button"
+                className={activeEditorMode === "captions" ? styles.toolModeActive : ""}
+                aria-pressed={activeEditorMode === "captions"}
+                aria-controls="editor-panel-captions"
+                onClick={() => setActiveEditorMode("captions")}
+              >
+                <Layers3 size={16} />
+                <span><strong>{"\uC790\uB9C9\u00B7PNG"}</strong><small>{items.length + graphics.length ? items.length + graphics.length + "\uAC1C \uB808\uC774\uC5B4" : "\uBB38\uAD6C\uC640 \uADF8\uB798\uD53D"}</small></span>
+              </button>
+              <button
+                type="button"
+                className={activeEditorMode === "generate" ? styles.toolModeActive : ""}
+                aria-pressed={activeEditorMode === "generate"}
+                aria-controls="editor-panel-generate"
+                onClick={() => setActiveEditorMode("generate")}
+              >
+                <Sparkles size={16} />
+                <span><strong>{"AI \uCEE7 \uC0DD\uC131"}</strong><small>{"Seedance \uC0DD\uC131 \uB3C4\uAD6C"}</small></span>
+              </button>
+            </div>
+          </nav>
+
+          <div className={styles.toolPanel}>
+          <div
+            id="editor-panel-generate"
+            role="region"
+            aria-label={"AI \uCEE7 \uC0DD\uC131"}
+            hidden={activeEditorMode !== "generate"}
+            className={`${styles.card} ${styles.generationCard}`}
+          >
             <div className={styles.aiGenerator}>
               <div className={styles.aiGeneratorHeader}>
                 <span><Sparkles size={14} /> {generationModelConfig.label}</span>
@@ -1462,7 +1511,13 @@ export function VideoAdEditor() {
               <small className={styles.aiHint}>생성 요청마다 Magnific API 크레딧이 사용됩니다. 완료 영상은 Supabase에 저장됩니다.</small>
             </div>
           </div>
-          <div className={`${styles.card} ${styles.copyCard}`}>
+          <div
+            id="editor-panel-captions"
+            role="region"
+            aria-label={"\uC790\uB9C9\uACFC PNG \uD3B8\uC9D1"}
+            hidden={activeEditorMode !== "captions"}
+            className={`${styles.card} ${styles.copyCard}`}
+          >
             <div className={styles.sectionTitleRow}>
               <div className={styles.sectionTitle}>
                 <span className={styles.panelIcon}><Layers3 size={16} /></span>
@@ -1639,7 +1694,13 @@ export function VideoAdEditor() {
             </div>
           </div>
 
-          <div className={`${styles.card} ${styles.uploadCard}`}>
+          <div
+            id="editor-panel-video"
+            role="region"
+            aria-label={"\uC601\uC0C1 \uC5D0\uC14B"}
+            hidden={activeEditorMode !== "video"}
+            className={`${styles.card} ${styles.uploadCard}`}
+          >
             <div className={styles.panelHeader}>
               <div className={styles.sectionTitle}>
                 <span className={styles.panelIcon}><UploadCloud size={16} /></span>
@@ -1754,16 +1815,17 @@ export function VideoAdEditor() {
             )}
 
             <div className={styles.assetTools} aria-label="에셋 추가 도구">
-              <button type="button" onClick={() => graphicInputRef.current?.click()} disabled={!asset || graphicUploading || graphics.length >= 10}>
+              <button type="button" onClick={() => { setActiveEditorMode("captions"); requestAnimationFrame(() => graphicInputRef.current?.click()); }} disabled={!asset || graphicUploading || graphics.length >= 10}>
                 {graphicUploading ? <LoaderCircle className={styles.spin} size={17} /> : <ImageIcon size={17} />}<span>PNG 글자</span><small>투명 이미지</small>
               </button>
               <button type="button" disabled title="배경 제거 기능은 준비 중입니다">
                 <Sparkles size={17} /><span>배경 제거</span><small>준비 중</small>
               </button>
-              <button type="button" onClick={addItem} disabled={!clips.length || items.length >= 20}>
+              <button type="button" onClick={() => { setActiveEditorMode("captions"); addItem(); }} disabled={!clips.length || items.length >= 20}>
                 <Type size={17} /><span>문구 추가</span><small>전체 타임라인</small>
               </button>
             </div>
+          </div>
           </div>
         </section>
 

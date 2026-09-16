@@ -75,9 +75,22 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
 SUPABASE_SECRET_KEY=...
 NEXT_PUBLIC_VIDEO_STORAGE_MODE=supabase
 BLOB_READ_WRITE_TOKEN=...
+MAGNIFIC_API_KEY=...
 ```
 
-`SUPABASE_SECRET_KEY`와 `BLOB_READ_WRITE_TOKEN`은 서버 전용이며 `NEXT_PUBLIC_` 접두사를 붙이면 안 됩니다. Vercel 배포의 최종 렌더는 Vercel Sandbox에서 실행되고 완성 MP4와 작업 상태는 비공개 Vercel Blob에 보관됩니다. 브라우저에는 Blob 원본 주소를 노출하지 않고 앱의 다운로드 API가 파일을 전달합니다. `pnpm build`는 공식 Vercel 템플릿 방식으로 `.remotion` 번들을 미리 만들고 렌더 API 배포 파일에 포함합니다. 현재 연결된 Supabase 무료 프로젝트의 객체 한도에 맞춰 웹 배포 업로드는 최대 50MB이고, 로컬 업로드는 기존대로 최대 100MB입니다.
+`SUPABASE_SECRET_KEY`, `BLOB_READ_WRITE_TOKEN`, `MAGNIFIC_API_KEY`는 서버 전용이며 `NEXT_PUBLIC_` 접두사를 붙이면 안 됩니다. Vercel 배포의 최종 렌더는 Vercel Sandbox에서 실행되고 완성 MP4와 작업 상태는 비공개 Vercel Blob에 보관됩니다. 브라우저에는 Blob 원본 주소를 노출하지 않고 앱의 다운로드 API가 파일을 전달합니다. `pnpm build`는 공식 Vercel 템플릿 방식으로 `.remotion` 번들을 미리 만들고 렌더 API 배포 파일에 포함합니다. 현재 연결된 Supabase 무료 프로젝트의 객체 한도에 맞춰 웹 배포 업로드는 최대 50MB이고, 로컬 업로드는 기존대로 최대 100MB입니다.
+
+### Seedance AI 컷 생성
+
+업로드 패널의 **Seedance 2.5 Pro** 영역에서 새 AI 컷을 만들거나 선택한 컷만 다시 생성할 수 있습니다.
+
+- 길이: 4~30초
+- 화질: 480p, 720p, 1080p
+- 비율: 편집기의 현재 출력 비율을 그대로 사용
+- 오디오: 효과음 생성 여부 선택
+- 처리: Magnific 상태를 조회하고 완료 MP4를 Supabase Storage로 복사한 뒤 타임라인에 추가 또는 교체
+
+생성 URL은 24시간만 유효하므로 앱이 완료 즉시 영상을 저장합니다. 생성 요청마다 Magnific API 크레딧이 사용됩니다. `MAGNIFIC_API_KEY`는 서버에서만 사용해야 합니다.
 
 배포된 업로드 경로만 실제 점검하려면 위 환경 변수를 셸에 설정한 뒤 다음처럼 실행합니다. 테스트 MP4와 Storage 객체는 점검 직후 자동 삭제됩니다.
 

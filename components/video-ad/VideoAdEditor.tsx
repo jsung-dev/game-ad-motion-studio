@@ -35,6 +35,17 @@ type EditorClip = {
   version: number;
 };
 
+type GenerationView = {
+  id: string;
+  targetClipId: string | null;
+  prompt: string;
+  status: "generating" | "importing" | "completed" | "failed";
+  stage: string;
+  error: string | null;
+  asset: VideoAsset | null;
+  fileSize: number | null;
+};
+
 type EditableTimelineTrack = "text" | "image";
 type TimelineDragMode = "move" | "resize-start" | "resize-end";
 type TimelineDrag = {
@@ -49,6 +60,7 @@ type TimelineDrag = {
 };
 
 const LAST_JOB_KEY = "video-ad:last-job";
+const LAST_GENERATION_KEY = "video-ad:last-generation";
 const CLOUD_UPLOADS_ENABLED = process.env.NEXT_PUBLIC_VIDEO_STORAGE_MODE === "supabase";
 const motions: Array<{ value: MotionPreset; label: string }> = [
   { value: "none", label: "모션 없음" },
@@ -62,6 +74,14 @@ const positions: Array<{ value: TextPosition; label: string }> = [
   { value: "bottom", label: "하단" },
 ];
 const outputRatios: OutputRatio[] = ["1:1", "21:9", "16:9", "4:3", "3:4", "9:16"];
+const seedanceRatios: Record<OutputRatio, string> = {
+  "1:1": "square_1_1",
+  "21:9": "film_horizontal_21_9",
+  "16:9": "widescreen_16_9",
+  "4:3": "classic_4_3",
+  "3:4": "traditional_3_4",
+  "9:16": "social_story_9_16",
+};
 const timelineTracks = [
   { key: "video", label: "영상", icon: Film },
   { key: "image", label: "이미지", icon: ImageIcon },
@@ -250,6 +270,13 @@ export function VideoAdEditor() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [snapGuide, setSnapGuide] = useState<number | null>(null);
+  const [newClipPrompt, setNewClipPrompt] = useState("");
+  const [generationDuration, setGenerationDuration] = useState(5);
+  const [generationResolution, setGenerationResolution] = useState<"480p" | "720p" | "1080p">("720p");
+  const [generationSound, setGenerationSound] = useState(true);
+  const [generationJob, setGenerationJob] = useState<GenerationView | null>(null);
+  const [generationError, setGenerationError] = useState<string | null>(null);
+  const appliedGenerationRef = useRef<string | null>(null);
 
   const selectedClip = clips.find((clip) => clip.id === selectedClipId) ?? null;
   const asset = selectedClip?.asset ?? null;
@@ -322,6 +349,7 @@ export function VideoAdEditor() {
     return errors;
   }, [asset, graphics, items, totalClipDuration]);
   const activeJob = job?.status === "queued" || job?.status === "rendering";
+  const activeGeneration = generationJob?.status === "generating" || generationJob?.status === "importing";
 
   const timelineSegments = useMemo(() => {
     const video: Array<{ id: string; start: number; end: number }> = [];
@@ -381,6 +409,72 @@ export function VideoAdEditor() {
     };
   }, [job?.id, job?.status, readJob]);
 
+
+  const readGeneration = useCallback(async (jobId: string) => {
+    const response = await fetch(`/api/video-ad/generations/${jobId}`, { cache: "no-store" });
+    if (response.status === 404) {
+      localStorage.removeItem(LAST_GENERATION_KEY);
+      return null;
+    }
+    return responseJson<GenerationView>(response);
+  }, []);
+
+  useEffect(() => {
+    const lastGeneration = localStorage.getItem(LAST_GENERATION_KEY);
+    if (!lastGeneration) return;
+    void readGeneration(lastGeneration)
+      .then((result) => result && setGenerationJob(result))
+      .catch(() => localStorage.removeItem(LAST_GENERATION_KEY));
+  }, [readGeneration]);
+
+  useEffect(() => {
+    if (!generationJob || !activeGeneration) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const next = await readGeneration(generationJob.id);
+        if (!cancelled && next) setGenerationJob(next);
+      } catch (error) {
+        if (!cancelled) setGenerationError(error instanceof Error ? error.message : "AI ?? ??? ???? ?????.");
+      }
+    };
+    void poll();
+    const timer = window.setInterval(poll, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [activeGeneration, generationJob?.id, readGeneration]);
+
+  useEffect(() => {
+    if (!generationJob?.asset || generationJob.status !== "completed") return;
+    if (appliedGenerationRef.current === generationJob.id) return;
+    appliedGenerationRef.current = generationJob.id;
+    const targetId = generationJob.targetClipId;
+    let nextClipId = targetId;
+    setClips((current) => {
+      const target = targetId ? current.find((clip) => clip.id === targetId) : null;
+      if (target) {
+        return current.map((clip) => clip.id === targetId ? {
+          ...clip,
+          asset: generationJob.asset!,
+          fileSize: generationJob.fileSize ?? 0,
+          version: clip.version + 1,
+        } : clip);
+      }
+      nextClipId = crypto.randomUUID();
+      return [...current, {
+        id: nextClipId,
+        asset: generationJob.asset!,
+        fileSize: generationJob.fileSize ?? 0,
+        prompt: generationJob.prompt,
+        version: 1,
+      }];
+    });
+    setSelectedClipId(nextClipId);
+    setNewClipPrompt("");
+    localStorage.removeItem(LAST_GENERATION_KEY);
+  }, [generationJob]);
   useEffect(() => {
     const player = playerRef.current;
     if (!player || !clips.length) return;
@@ -678,6 +772,37 @@ export function VideoAdEditor() {
     );
   };
 
+
+  const startAiGeneration = async (targetClipId: string | null) => {
+    if (activeGeneration) return;
+    const target = targetClipId ? clips.find((clip) => clip.id === targetClipId) : null;
+    const prompt = (target?.prompt ?? newClipPrompt).trim();
+    if (!prompt) {
+      setGenerationError("??? ??? ??? ???.");
+      return;
+    }
+    setGenerationError(null);
+    appliedGenerationRef.current = null;
+    try {
+      const response = await fetch("/api/video-ad/generations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetClipId,
+          prompt,
+          duration: generationDuration,
+          resolution: generationResolution,
+          aspectRatio: seedanceRatios[outputRatio],
+          soundEffects: generationSound,
+        }),
+      });
+      const created = await responseJson<GenerationView>(response);
+      setGenerationJob(created);
+      localStorage.setItem(LAST_GENERATION_KEY, created.id);
+    } catch (error) {
+      setGenerationError(error instanceof Error ? error.message : "AI ?? ??? ???? ?????.");
+    }
+  };
   const startSequencePlayback = () => {
     if (!clips.length) return;
     setSelectedClipId(clips[0].id);
@@ -1030,21 +1155,55 @@ export function VideoAdEditor() {
                     );
                   })}
                 </div>
-                {selectedClip && (
-                  <label className={styles.clipPrompt}>
-                    <span>선택 컷 생성 메모</span>
-                    <textarea
-                      rows={2}
-                      value={selectedClip.prompt}
-                      placeholder="예: 캐릭터가 보스를 향해 달려가는 3초 장면"
-                      onChange={(event) => updateClipPrompt(selectedClip.id, event.target.value)}
-                    />
-                    <small>영상 생성 API 연결 시 이 컷만 재생성하는 입력값으로 사용됩니다.</small>
-                  </label>
-                )}
                 <p className={styles.sequenceSummary}>총 {clips.length}개 컷 · {totalClipDuration.toFixed(2)}초</p>
               </div>
             )}
+
+            <div className={styles.aiGenerator}>
+              <div className={styles.aiGeneratorHeader}>
+                <span><Sparkles size={14} /> Seedance 2.5 Pro</span>
+                <em>API 크레딧 사용</em>
+              </div>
+              {selectedClip && (
+                <label className={styles.clipPrompt}>
+                  <span>선택 컷 재생성 프롬프트</span>
+                  <textarea
+                    rows={3}
+                    value={selectedClip.prompt}
+                    placeholder="예: 판타지 게임 캐릭터가 보스를 향해 달려가는 역동적인 장면"
+                    onChange={(event) => updateClipPrompt(selectedClip.id, event.target.value)}
+                    disabled={activeGeneration}
+                  />
+                </label>
+              )}
+              <label className={styles.clipPrompt}>
+                <span>새 AI 컷 프롬프트</span>
+                <textarea
+                  rows={3}
+                  value={newClipPrompt}
+                  placeholder="새로운 장면을 설명하면 현재 타임라인 끝에 추가됩니다"
+                  onChange={(event) => setNewClipPrompt(event.target.value)}
+                  disabled={activeGeneration}
+                />
+              </label>
+              <div className={styles.aiOptions}>
+                <label><span>길이</span><input type="number" min={4} max={30} step={1} value={generationDuration} disabled={activeGeneration} onChange={(event) => setGenerationDuration(Math.max(4, Math.min(30, Math.round(Number(event.target.value) || 4))))} /></label>
+                <label><span>화질</span><select value={generationResolution} disabled={activeGeneration} onChange={(event) => setGenerationResolution(event.target.value as "480p" | "720p" | "1080p")}><option value="480p">480p</option><option value="720p">720p</option><option value="1080p">1080p</option></select></label>
+                <label className={styles.aiSound}><input type="checkbox" checked={generationSound} disabled={activeGeneration} onChange={(event) => setGenerationSound(event.target.checked)} /><span>효과음 생성</span></label>
+              </div>
+              <div className={styles.aiActions}>
+                {selectedClip && <button type="button" disabled={activeGeneration || !selectedClip.prompt.trim()} onClick={() => void startAiGeneration(selectedClip.id)}><RefreshCw size={13} /> 선택 컷 다시 생성</button>}
+                <button type="button" disabled={activeGeneration || !newClipPrompt.trim()} onClick={() => void startAiGeneration(null)}><Sparkles size={13} /> 새 AI 컷 추가</button>
+              </div>
+              {generationJob && (
+                <div className={`${styles.generationStatus} ${styles[generationJob.status]}`}>
+                  {activeGeneration ? <LoaderCircle className={styles.spin} size={14} /> : generationJob.status === "completed" ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
+                  <span>{generationJob.stage}</span>
+                </div>
+              )}
+              {(generationError || generationJob?.error) && <p className={styles.errorBox}>{generationError || generationJob?.error}</p>}
+              <small className={styles.aiHint}>생성 요청마다 Magnific API 크레딧이 사용됩니다. 완료 영상은 Supabase에 저장됩니다.</small>
+            </div>
 
             <div className={styles.assetTools} aria-label="에셋 추가 도구">
               <button type="button" onClick={() => graphicInputRef.current?.click()} disabled={!asset || graphicUploading || graphics.length >= 10}>

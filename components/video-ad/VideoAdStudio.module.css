@@ -76,15 +76,21 @@
   box-shadow: 0 14px 35px rgba(0, 0, 0, .18);
 }
 .card, .renderCard { padding: 16px; }
-.uploadCard {
+.generationCard {
   grid-column: 1;
-  grid-row: 1 / span 2;
+  grid-row: 1;
   position: sticky;
   top: 76px;
   max-height: calc(100dvh - 88px);
   overflow: auto;
   scrollbar-width: thin;
   scrollbar-color: #363d50 transparent;
+}
+.generationCard .aiGenerator { margin-top: 0; }
+.uploadCard {
+  grid-column: 1;
+  grid-row: 2;
+  min-width: 0;
 }
 .copyCard { grid-column: 2; grid-row: 2; min-width: 0; }
 .canvasPanel {
@@ -191,6 +197,22 @@
 .modelOptionActive { border-color: #7968df; background: #282142; box-shadow: inset 0 0 0 1px rgba(139, 120, 244, .15); }
 .modelOption span { overflow: hidden; color: #e0dcff; font-size: 8px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
 .modelOption small { overflow: hidden; color: #9196b8; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.generationRatioSelector {
+  margin: 11px 0 0;
+  border: 1px solid #3a345a;
+  border-radius: 9px;
+  padding: 8px;
+  background: #111421;
+}
+.generationRatioSelector legend { padding: 0 4px; color: #c9c0ff; font-size: 8px; font-weight: 800; }
+.generationRatioGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; }
+.generationRatioOption { min-width: 0; min-height: 55px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; border: 1px solid #333a49; border-radius: 7px; color: #8c95a9; background: #151924; cursor: pointer; transition: border-color .16s ease, background .16s ease, transform .16s ease; }
+.generationRatioOption:hover:not(:disabled) { border-color: #695cc0; background: #211d36; transform: translateY(-1px); }
+.generationRatioOption:disabled { cursor: not-allowed; opacity: .55; }
+.generationRatioOptionActive { border-color: #806dea; color: #d1c9ff; background: #272044; box-shadow: inset 0 0 0 1px rgba(128, 109, 234, .16); }
+.generationRatioIcon { display: block; width: min(28px, 65%); max-height: 24px; border: 1.5px solid currentColor; border-radius: 2px; }
+.generationRatioOption strong { font-size: 8px; }
+.generationRatioNotice { display: block; margin-top: 7px; color: #a49cd0; font-size: 7px; line-height: 1.45; }
 .referenceMedia { margin-top: 9px; border: 1px solid #39324f; border-radius: 9px; padding: 8px; background: #11131d; }
 .referenceMediaHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .referenceMediaHeader > div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
@@ -411,6 +433,17 @@
 
 .page button:focus-visible, .page input:focus-visible, .page select:focus-visible, .page textarea:focus-visible, .page summary:focus-visible { outline: 2px solid #8a78f6; outline-offset: 2px; }
 
+
+.captionAddButton { min-height: 34px; border-color: #6656d2 !important; color: #e1dcff !important; background: #252040 !important; }
+.captionAddButton:hover:not(:disabled) { border-color: #8a78f2 !important; background: #302750 !important; }
+.captionInputHint { margin: 11px 0 0; border: 1px solid #3e3960; border-radius: 9px; padding: 9px 10px; color: #bab2e7; background: #17152a; font-size: 9px; line-height: 1.5; }
+.itemList { grid-template-columns: 1fr; gap: 12px; }
+.textCard { padding: 16px; }
+.textCardHeader strong { font-size: 12px; }
+.fieldWide { gap: 8px; color: #b7bfd0; font-size: 10px; }
+.fieldWide textarea { min-height: 112px; padding: 12px; border-color: #4a5165; font-size: 14px; font-weight: 620; line-height: 1.55; }
+.fieldWide textarea::placeholder { color: #687387; font-weight: 500; }
+
 @media (max-width: 1240px) {
   .header { grid-template-columns: 230px minmax(0, 1fr) auto; }
   .workspace { grid-template-columns: 230px minmax(430px, 1fr) 280px; }
@@ -422,7 +455,8 @@
   .header { grid-template-columns: 210px minmax(0, 1fr) auto; }
   .saveStatus { display: none; }
   .workspace { grid-template-columns: 240px minmax(0, 1fr); grid-template-rows: auto auto auto; }
-  .uploadCard { grid-column: 1; grid-row: 1 / span 3; }
+  .generationCard { grid-column: 1; grid-row: 1; }
+  .uploadCard { grid-column: 1; grid-row: 2 / span 2; }
   .canvasPanel { grid-column: 2; grid-row: 1; }
   .renderCard { grid-column: 2; grid-row: 2; position: static; max-height: none; overflow: visible; }
   .copyCard { grid-column: 2; grid-row: 3; }
@@ -447,9 +481,10 @@
   .workspace { display: flex; flex-direction: column; gap: 10px; padding: 10px; }
   .editorColumn, .previewColumn, .sticky { display: contents; }
   .canvasPanel { order: 1; width: 100%; min-height: auto; grid-template-rows: 38px minmax(340px, 62vh) 46px 180px; }
-  .uploadCard { order: 2; position: static; width: 100%; max-height: none; overflow: visible; }
+  .generationCard { order: 2; position: static; width: 100%; max-height: none; overflow: visible; }
   .copyCard { order: 3; width: 100%; }
-  .renderCard { order: 4; width: 100%; }
+  .uploadCard { order: 4; position: static; width: 100%; max-height: none; overflow: visible; }
+  .renderCard { order: 5; width: 100%; }
   .canvasSurface { padding: 12px; }
   .playerShell { height: min(55vh, 500px); }
   .ratioGrid { grid-template-columns: repeat(3, 1fr); }

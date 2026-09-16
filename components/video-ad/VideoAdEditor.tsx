@@ -14,6 +14,7 @@ import {
   type AspectMode, type GraphicAsset, type GraphicItem, type MotionPreset, type OutputRatio,
   type RenderJobStatus, type SeedanceModel, type TextItem, type TextPosition, type VideoAdSequenceClip, type VideoAsset,
 } from "@/lib/video-ad/types";
+import type { SeedanceAspectRatio } from "@/lib/video-ad/magnific";
 import { getDurationInFrames, getGraphicItemErrors, getItemErrors, validateEditorPayload } from "@/lib/video-ad/validation";
 import { VideoAdSequenceComposition } from "@/remotion/AdComposition";
 import styles from "./VideoAdStudio.module.css";
@@ -78,14 +79,19 @@ const positions: Array<{ value: TextPosition; label: string }> = [
   { value: "bottom", label: "하단" },
 ];
 const outputRatios: OutputRatio[] = ["1:1", "21:9", "16:9", "4:3", "3:4", "9:16"];
-const seedanceRatios: Record<OutputRatio, string> = {
-  "1:1": "square_1_1",
-  "21:9": "film_horizontal_21_9",
-  "16:9": "widescreen_16_9",
-  "4:3": "classic_4_3",
-  "3:4": "traditional_3_4",
-  "9:16": "social_story_9_16",
-};
+const seedanceAspectRatioOptions: Array<{
+  value: SeedanceAspectRatio;
+  label: string;
+  visualRatio: string;
+}> = [
+  { value: "film_horizontal_21_9", label: "21:9", visualRatio: "21 / 9" },
+  { value: "widescreen_16_9", label: "16:9", visualRatio: "16 / 9" },
+  { value: "classic_4_3", label: "4:3", visualRatio: "4 / 3" },
+  { value: "square_1_1", label: "1:1", visualRatio: "1 / 1" },
+  { value: "traditional_3_4", label: "3:4", visualRatio: "3 / 4" },
+  { value: "social_story_9_16", label: "9:16", visualRatio: "9 / 16" },
+  { value: "film_vertical_9_21", label: "9:21", visualRatio: "9 / 21" },
+];
 const seedanceModelOptions: Record<SeedanceModel, {
   label: string;
   maxDuration: number;
@@ -294,6 +300,7 @@ export function VideoAdEditor() {
   const [referenceMediaUploading, setReferenceMediaUploading] = useState(false);
   const [referenceMediaError, setReferenceMediaError] = useState<string | null>(null);
   const [generationModel, setGenerationModel] = useState<SeedanceModel>("seedance-2-5-pro");
+  const [generationAspectRatio, setGenerationAspectRatio] = useState<SeedanceAspectRatio>("social_story_9_16");
   const [job, setJob] = useState<JobView | null>(null);
   const [currentFrame, setCurrentFrame] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -859,7 +866,7 @@ export function VideoAdEditor() {
           prompt,
           duration: generationDuration,
           resolution: generationResolution,
-          aspectRatio: seedanceRatios[outputRatio],
+          aspectRatio: generationAspectRatio,
           soundEffects: generationSound,
           imageAssetId: referenceImage?.id ?? null,
           referenceMedia: referenceMedia.map((media) => ({ kind: media.kind, assetId: media.asset.id })),
@@ -1223,120 +1230,7 @@ export function VideoAdEditor() {
 
       <div className={styles.workspace}>
         <section className={styles.editorColumn}>
-          <div className={`${styles.card} ${styles.uploadCard}`}>
-            <div className={styles.panelHeader}>
-              <div className={styles.sectionTitle}>
-                <span className={styles.panelIcon}><UploadCloud size={16} /></span>
-                <div><h2>영상 에셋</h2><p>편집할 원본을 추가하세요</p></div>
-              </div>
-              <span className={styles.countBadge}>{clips.length}개 컷</span>
-            </div>
-
-            <input
-              ref={inputRef}
-              className={styles.hiddenInput}
-              type="file"
-              accept="video/mp4,.mp4"
-              multiple
-              onChange={(event) => {
-                const files = Array.from(event.target.files ?? []);
-                if (files.length) void addClipFiles(files);
-              }}
-            />
-            <input
-              ref={replaceInputRef}
-              className={styles.hiddenInput}
-              type="file"
-              accept="video/mp4,.mp4"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                const clipId = replaceTargetRef.current;
-                if (file && clipId) void replaceClipFile(clipId, file);
-              }}
-            />
-            <button
-              type="button"
-              className={`${styles.dropzone} ${dragging ? styles.dragging : ""}`}
-              disabled={uploading}
-              onClick={() => inputRef.current?.click()}
-              onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
-              onDragOver={(event) => event.preventDefault()}
-              onDragLeave={(event) => { event.preventDefault(); setDragging(false); }}
-              onDrop={(event) => {
-                event.preventDefault();
-                setDragging(false);
-                const files = Array.from(event.dataTransfer.files ?? []);
-                if (files.length) void addClipFiles(files);
-              }}
-            >
-              <span className={styles.uploadIcon}>{uploading ? <LoaderCircle className={styles.spin} /> : <UploadCloud />}</span>
-              <strong>{uploading ? "영상 분석 및 저장 중…" : clips.length ? "영상 컷 더 추가" : "영상을 드래그하거나 선택"}</strong>
-              <span>{clips.length ? "여러 MP4를 추가하거나 아래에서 개별 교체하세요" : "여러 파일을 한 번에 선택할 수 있습니다"}</span>
-              <span className={styles.formatTags}>
-                <em>MP4</em><em>최대 {CLOUD_UPLOADS_ENABLED ? "50MB" : "100MB"}</em><em>최대 30초</em>
-              </span>
-            </button>
-            {uploadError && <p className={styles.errorBox}>{uploadError}</p>}
-            {selectedClip && asset && (
-              <div className={styles.assetCard}>
-                {isPlaying ? (
-                  <span className={styles.assetThumbnailPlaceholder}><Film size={18} /></span>
-                ) : (
-                  <video className={styles.assetThumbnail} src={asset.sourceUrl} muted playsInline preload="metadata" />
-                )}
-                <div className={styles.assetInfo}>
-                  <strong title={asset.originalName}>{asset.originalName}</strong>
-                  <span>선택 컷 {selectedClipIndex + 1} · 버전 {selectedClip.version} · {asset.metadata.duration.toFixed(2)}초</span>
-                  <span>{asset.metadata.width}×{asset.metadata.height} · 원본 {asset.metadata.fps.toFixed(2)}fps</span>
-                  <span>{assetFileSize ? `${(assetFileSize / 1024 / 1024).toFixed(1)}MB · ` : ""}{asset.metadata.hasAudio ? "오디오 있음" : "무음 영상"}</span>
-                </div>
-                <button type="button" className={styles.assetRemove} aria-label="선택 컷 삭제" onClick={() => removeClip(selectedClip.id)}><Trash2 size={15} /></button>
-              </div>
-            )}
-
-            {clips.length > 0 && (
-              <div className={styles.clipManager}>
-                <div className={styles.clipManagerHeader}>
-                  <span><Layers3 size={13} /> 컷 구성</span>
-                  <button type="button" onClick={startSequencePlayback}>
-                    <Play size={12} /> 전체 재생
-                  </button>
-                </div>
-                <div className={styles.clipManagerList}>
-                  {clips.map((clip, index) => {
-                    const clipStart = (clipStartFrames[index] ?? 0) / previewFps;
-                    const clipEnd = clipStart + (clipFrameCounts[index] ?? 1) / previewFps;
-                    const textLayerCount = items.filter((item) => item.end > clipStart && item.start < clipEnd).length;
-                    const graphicLayerCount = graphics.filter((item) => item.end > clipStart && item.start < clipEnd).length;
-                    return (
-                      <article
-                      key={clip.id}
-                      className={clip.id === selectedClipId ? styles.selectedClipCard : ""}
-                      onClick={() => selectClip(clip.id)}
-                    >
-                      {isPlaying ? (
-                        <span className={styles.clipThumbnailPlaceholder}><Film size={15} /></span>
-                      ) : (
-                        <video src={clip.asset.sourceUrl} muted playsInline preload="metadata" />
-                      )}
-                      <span className={styles.clipNumber}>{index + 1}</span>
-                      <div>
-                        <strong title={clip.asset.originalName}>{clip.asset.originalName}</strong>
-                        <small>{clip.asset.metadata.duration.toFixed(2)}초 · {clip.asset.metadata.fps.toFixed(1)}fps · 레이어 {textLayerCount + graphicLayerCount}개</small>
-                      </div>
-                      <div className={styles.clipCardActions}>
-                        <button type="button" title="앞으로 이동" disabled={index === 0} onClick={(event) => { event.stopPropagation(); moveClip(clip.id, -1); }}><ChevronLeft size={13} /></button>
-                        <button type="button" title="뒤로 이동" disabled={index === clips.length - 1} onClick={(event) => { event.stopPropagation(); moveClip(clip.id, 1); }}><ChevronRight size={13} /></button>
-                        <button type="button" title="이 컷만 새 MP4로 교체" onClick={(event) => { event.stopPropagation(); replaceTargetRef.current = clip.id; replaceInputRef.current?.click(); }}><RefreshCw size={12} /></button>
-                      </div>
-                      </article>
-                    );
-                  })}
-                </div>
-                <p className={styles.sequenceSummary}>총 {clips.length}개 컷 · {totalClipDuration.toFixed(2)}초</p>
-              </div>
-            )}
-
+          <div className={`${styles.card} ${styles.generationCard}`}>
             <div className={styles.aiGenerator}>
               <div className={styles.aiGeneratorHeader}>
                 <span><Sparkles size={14} /> {generationModelConfig.label}</span>
@@ -1367,6 +1261,35 @@ export function VideoAdEditor() {
                   );
                 })}
               </div>
+
+              <fieldset className={styles.generationRatioSelector}>
+                <legend>{"\uC0DD\uC131 \uD654\uBA74 \uBE44\uC728"}</legend>
+                <div className={styles.generationRatioGrid} role="group" aria-label={"\uC2DC\uB304\uC2A4 \uC0DD\uC131 \uD654\uBA74 \uBE44\uC728"}>
+                  {seedanceAspectRatioOptions.map((option) => {
+                    const selected = generationAspectRatio === option.value;
+                    return (
+                      <button
+                        type="button"
+                        key={option.value}
+                        className={[
+                          styles.generationRatioOption,
+                          selected ? styles.generationRatioOptionActive : "",
+                        ].filter(Boolean).join(" ")}
+                        onClick={() => {
+                          setGenerationAspectRatio(option.value);
+                          setGenerationError(null);
+                        }}
+                        disabled={activeGeneration || Boolean(referenceImage)}
+                        aria-pressed={selected}
+                      >
+                        <span className={styles.generationRatioIcon} style={{ aspectRatio: option.visualRatio }} />
+                        <strong>{option.label}</strong>
+                      </button>
+                    );
+                  })}
+                </div>
+                {referenceImage && <small className={styles.generationRatioNotice}>{"\uC2DC\uC791 \uC774\uBBF8\uC9C0\uB97C \uC4F0\uBA74 \uC774\uBBF8\uC9C0 \uC6D0\uBCF8 \uBE44\uC728\uC774 \uC801\uC6A9\uB429\uB2C8\uB2E4."}</small>}
+              </fieldset>
 
               <input
                 ref={referenceImageInputRef}
@@ -1538,20 +1461,7 @@ export function VideoAdEditor() {
               {(generationError || generationJob?.error) && <p className={styles.errorBox}>{generationError || generationJob?.error}</p>}
               <small className={styles.aiHint}>생성 요청마다 Magnific API 크레딧이 사용됩니다. 완료 영상은 Supabase에 저장됩니다.</small>
             </div>
-
-            <div className={styles.assetTools} aria-label="에셋 추가 도구">
-              <button type="button" onClick={() => graphicInputRef.current?.click()} disabled={!asset || graphicUploading || graphics.length >= 10}>
-                {graphicUploading ? <LoaderCircle className={styles.spin} size={17} /> : <ImageIcon size={17} />}<span>PNG 글자</span><small>투명 이미지</small>
-              </button>
-              <button type="button" disabled title="배경 제거 기능은 준비 중입니다">
-                <Sparkles size={17} /><span>배경 제거</span><small>준비 중</small>
-              </button>
-              <button type="button" onClick={addItem} disabled={!clips.length || items.length >= 20}>
-                <Type size={17} /><span>문구 추가</span><small>전체 타임라인</small>
-              </button>
-            </div>
           </div>
-
           <div className={`${styles.card} ${styles.copyCard}`}>
             <div className={styles.sectionTitleRow}>
               <div className={styles.sectionTitle}>
@@ -1569,6 +1479,10 @@ export function VideoAdEditor() {
                     if (file) void uploadGraphic(file);
                   }}
                 />
+                <button type="button" className={styles.captionAddButton} onClick={addItem} disabled={!clips.length || items.length >= 20}>
+                  <Type size={15} />
+                  {"\uC790\uB9C9 \uCD94\uAC00"}
+                </button>
                 <button type="button" onClick={addExamples} disabled={!clips.length || items.length > 17}>
                   <Sparkles size={15} /> 예제 3개 추가
                 </button>
@@ -1585,6 +1499,7 @@ export function VideoAdEditor() {
             {asset && items.length === 0 && graphics.length === 0 && <div className={styles.empty}>문구를 입력하거나 투명 PNG 글자를 추가해 보세요.</div>}
 
             {graphicError && <p className={styles.errorBox}>{graphicError}</p>}
+            {asset && <p className={styles.captionInputHint}>{"\uC790\uB9C9 \uB0B4\uC6A9\uC744 \uD06C\uAC8C \uC785\uB825\uD558\uACE0, \uC544\uB798\uC5D0\uC11C \uB178\uCD9C \uC2DC\uC791\uACFC \uC885\uB8CC \uC2DC\uAC04\uC744 \uC815\uD558\uC138\uC694."}</p>}
 
             <div className={styles.itemList}>
               {items.map((item, index) => {
@@ -1601,7 +1516,7 @@ export function VideoAdEditor() {
 
                     <label className={styles.fieldWide}>
                       <span>문구</span>
-                      <textarea rows={2} maxLength={180} value={item.text} onChange={(event) => updateItem(item.id, "text", event.target.value)} />
+                      <textarea aria-label={"\uC790\uB9C9 \uBB38\uAD6C"} rows={4} maxLength={180} placeholder={"\uC790\uB9C9\uC744 \uC785\uB825\uD558\uC138\uC694. Enter\uB85C \uC904\uBC14\uAFC8\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4."} value={item.text} onChange={(event) => updateItem(item.id, "text", event.target.value)} />
                     </label>
 
                     <div className={styles.quickFieldGrid}>
@@ -1721,6 +1636,133 @@ export function VideoAdEditor() {
                   </article>
                 );
               })}
+            </div>
+          </div>
+
+          <div className={`${styles.card} ${styles.uploadCard}`}>
+            <div className={styles.panelHeader}>
+              <div className={styles.sectionTitle}>
+                <span className={styles.panelIcon}><UploadCloud size={16} /></span>
+                <div><h2>영상 에셋</h2><p>편집할 원본을 추가하세요</p></div>
+              </div>
+              <span className={styles.countBadge}>{clips.length}개 컷</span>
+            </div>
+
+            <input
+              ref={inputRef}
+              className={styles.hiddenInput}
+              type="file"
+              accept="video/mp4,.mp4"
+              multiple
+              onChange={(event) => {
+                const files = Array.from(event.target.files ?? []);
+                if (files.length) void addClipFiles(files);
+              }}
+            />
+            <input
+              ref={replaceInputRef}
+              className={styles.hiddenInput}
+              type="file"
+              accept="video/mp4,.mp4"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                const clipId = replaceTargetRef.current;
+                if (file && clipId) void replaceClipFile(clipId, file);
+              }}
+            />
+            <button
+              type="button"
+              className={`${styles.dropzone} ${dragging ? styles.dragging : ""}`}
+              disabled={uploading}
+              onClick={() => inputRef.current?.click()}
+              onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
+              onDragOver={(event) => event.preventDefault()}
+              onDragLeave={(event) => { event.preventDefault(); setDragging(false); }}
+              onDrop={(event) => {
+                event.preventDefault();
+                setDragging(false);
+                const files = Array.from(event.dataTransfer.files ?? []);
+                if (files.length) void addClipFiles(files);
+              }}
+            >
+              <span className={styles.uploadIcon}>{uploading ? <LoaderCircle className={styles.spin} /> : <UploadCloud />}</span>
+              <strong>{uploading ? "영상 분석 및 저장 중…" : clips.length ? "영상 컷 더 추가" : "영상을 드래그하거나 선택"}</strong>
+              <span>{clips.length ? "여러 MP4를 추가하거나 아래에서 개별 교체하세요" : "여러 파일을 한 번에 선택할 수 있습니다"}</span>
+              <span className={styles.formatTags}>
+                <em>MP4</em><em>최대 {CLOUD_UPLOADS_ENABLED ? "50MB" : "100MB"}</em><em>최대 30초</em>
+              </span>
+            </button>
+            {uploadError && <p className={styles.errorBox}>{uploadError}</p>}
+            {selectedClip && asset && (
+              <div className={styles.assetCard}>
+                {isPlaying ? (
+                  <span className={styles.assetThumbnailPlaceholder}><Film size={18} /></span>
+                ) : (
+                  <video className={styles.assetThumbnail} src={asset.sourceUrl} muted playsInline preload="metadata" />
+                )}
+                <div className={styles.assetInfo}>
+                  <strong title={asset.originalName}>{asset.originalName}</strong>
+                  <span>선택 컷 {selectedClipIndex + 1} · 버전 {selectedClip.version} · {asset.metadata.duration.toFixed(2)}초</span>
+                  <span>{asset.metadata.width}×{asset.metadata.height} · 원본 {asset.metadata.fps.toFixed(2)}fps</span>
+                  <span>{assetFileSize ? `${(assetFileSize / 1024 / 1024).toFixed(1)}MB · ` : ""}{asset.metadata.hasAudio ? "오디오 있음" : "무음 영상"}</span>
+                </div>
+                <button type="button" className={styles.assetRemove} aria-label="선택 컷 삭제" onClick={() => removeClip(selectedClip.id)}><Trash2 size={15} /></button>
+              </div>
+            )}
+
+            {clips.length > 0 && (
+              <div className={styles.clipManager}>
+                <div className={styles.clipManagerHeader}>
+                  <span><Layers3 size={13} /> 컷 구성</span>
+                  <button type="button" onClick={startSequencePlayback}>
+                    <Play size={12} /> 전체 재생
+                  </button>
+                </div>
+                <div className={styles.clipManagerList}>
+                  {clips.map((clip, index) => {
+                    const clipStart = (clipStartFrames[index] ?? 0) / previewFps;
+                    const clipEnd = clipStart + (clipFrameCounts[index] ?? 1) / previewFps;
+                    const textLayerCount = items.filter((item) => item.end > clipStart && item.start < clipEnd).length;
+                    const graphicLayerCount = graphics.filter((item) => item.end > clipStart && item.start < clipEnd).length;
+                    return (
+                      <article
+                      key={clip.id}
+                      className={clip.id === selectedClipId ? styles.selectedClipCard : ""}
+                      onClick={() => selectClip(clip.id)}
+                    >
+                      {isPlaying ? (
+                        <span className={styles.clipThumbnailPlaceholder}><Film size={15} /></span>
+                      ) : (
+                        <video src={clip.asset.sourceUrl} muted playsInline preload="metadata" />
+                      )}
+                      <span className={styles.clipNumber}>{index + 1}</span>
+                      <div>
+                        <strong title={clip.asset.originalName}>{clip.asset.originalName}</strong>
+                        <small>{clip.asset.metadata.duration.toFixed(2)}초 · {clip.asset.metadata.fps.toFixed(1)}fps · 레이어 {textLayerCount + graphicLayerCount}개</small>
+                      </div>
+                      <div className={styles.clipCardActions}>
+                        <button type="button" title="앞으로 이동" disabled={index === 0} onClick={(event) => { event.stopPropagation(); moveClip(clip.id, -1); }}><ChevronLeft size={13} /></button>
+                        <button type="button" title="뒤로 이동" disabled={index === clips.length - 1} onClick={(event) => { event.stopPropagation(); moveClip(clip.id, 1); }}><ChevronRight size={13} /></button>
+                        <button type="button" title="이 컷만 새 MP4로 교체" onClick={(event) => { event.stopPropagation(); replaceTargetRef.current = clip.id; replaceInputRef.current?.click(); }}><RefreshCw size={12} /></button>
+                      </div>
+                      </article>
+                    );
+                  })}
+                </div>
+                <p className={styles.sequenceSummary}>총 {clips.length}개 컷 · {totalClipDuration.toFixed(2)}초</p>
+              </div>
+            )}
+
+            <div className={styles.assetTools} aria-label="에셋 추가 도구">
+              <button type="button" onClick={() => graphicInputRef.current?.click()} disabled={!asset || graphicUploading || graphics.length >= 10}>
+                {graphicUploading ? <LoaderCircle className={styles.spin} size={17} /> : <ImageIcon size={17} />}<span>PNG 글자</span><small>투명 이미지</small>
+              </button>
+              <button type="button" disabled title="배경 제거 기능은 준비 중입니다">
+                <Sparkles size={17} /><span>배경 제거</span><small>준비 중</small>
+              </button>
+              <button type="button" onClick={addItem} disabled={!clips.length || items.length >= 20}>
+                <Type size={17} /><span>문구 추가</span><small>전체 타임라인</small>
+              </button>
             </div>
           </div>
         </section>

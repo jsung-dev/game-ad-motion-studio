@@ -1,3 +1,4 @@
+import type { SeedanceModel } from "./types";
 const MAGNIFIC_BASE_URL = "https://api.magnific.com";
 
 export type SeedanceResolution = "480p" | "720p" | "1080p";
@@ -9,8 +10,37 @@ export type SeedanceAspectRatio =
   | "traditional_3_4"
   | "social_story_9_16"
   | "film_vertical_9_21";
+export const isSeedanceModel = (value: unknown): value is SeedanceModel =>
+  value === "seedance-2-pro" || value === "seedance-2-5-pro";
+
+export const SEEDANCE_MODEL_LIMITS: Record<
+  SeedanceModel,
+  {
+    maxDuration: number;
+    maxReferenceImages: number;
+    maxReferenceVideos: number;
+    maxReferenceVideoSeconds: number;
+    maxReferenceVideoTotalSeconds: number;
+  }
+> = {
+  "seedance-2-pro": {
+    maxDuration: 15,
+    maxReferenceImages: 0,
+    maxReferenceVideos: 0,
+    maxReferenceVideoSeconds: 0,
+    maxReferenceVideoTotalSeconds: 0,
+  },
+  "seedance-2-5-pro": {
+    maxDuration: 30,
+    maxReferenceImages: 30,
+    maxReferenceVideos: 10,
+    maxReferenceVideoSeconds: 30,
+    maxReferenceVideoTotalSeconds: 30,
+  },
+};
 
 export type SeedanceRequest = {
+  model: SeedanceModel;
   prompt: string;
   duration: number;
   aspectRatio: SeedanceAspectRatio;
@@ -18,6 +48,8 @@ export type SeedanceRequest = {
   soundEffects: boolean;
   /** A temporary, publicly reachable URL for Seedance image-to-video mode. */
   image?: string;
+  referenceImages?: string[];
+  referenceVideos?: string[];
 };
 
 export type MagnificTask = {
@@ -43,9 +75,16 @@ const apiKey = () => {
   return value;
 };
 
-const endpoint = (resolution: SeedanceResolution, taskId?: string) => {
-  const base = `${MAGNIFIC_BASE_URL}/v1/ai/video/seedance-2-5-pro-${resolution}`;
-  return taskId ? `${base}/${encodeURIComponent(taskId)}` : base;
+const endpoint = (model: SeedanceModel, resolution: SeedanceResolution, taskId?: string) => {
+  const base = `${MAGNIFIC_BASE_URL}/v1/ai/video`;
+  if (model === "seedance-2-pro") {
+    const modelPath = `${base}/seedance-2-pro`;
+    return taskId
+      ? `${modelPath}/${encodeURIComponent(taskId)}`
+      : `${modelPath}-${resolution}`;
+  }
+  const modelPath = `${base}/seedance-2-5-pro-${resolution}`;
+  return taskId ? `${modelPath}/${encodeURIComponent(taskId)}` : modelPath;
 };
 
 const parseError = (body: unknown, fallback: string) => {
@@ -110,7 +149,7 @@ const callMagnific = async (url: string, init?: RequestInit) => {
 };
 
 export const createSeedanceTask = (request: SeedanceRequest) =>
-  callMagnific(endpoint(request.resolution), {
+  callMagnific(endpoint(request.model, request.resolution), {
     method: "POST",
     body: JSON.stringify({
       prompt: request.prompt,
@@ -118,13 +157,15 @@ export const createSeedanceTask = (request: SeedanceRequest) =>
       aspect_ratio: request.aspectRatio,
       sound_effects: request.soundEffects,
       no_music: false,
-      output_format: "mp4",
+      ...(request.model === "seedance-2-5-pro" ? { output_format: "mp4" } : {}),
       seed: -1,
       enable_safety_checker: true,
       ...(request.image ? { image: request.image } : {}),
+      ...(request.model === "seedance-2-5-pro" && request.referenceImages?.length ? { reference_images: request.referenceImages } : {}),
+      ...(request.model === "seedance-2-5-pro" && request.referenceVideos?.length ? { reference_videos: request.referenceVideos } : {}),
     }),
   });
 
-export const getSeedanceTask = (resolution: SeedanceResolution, taskId: string) =>
-  callMagnific(endpoint(resolution, taskId));
+export const getSeedanceTask = (model: SeedanceModel, resolution: SeedanceResolution, taskId: string) =>
+  callMagnific(endpoint(model, resolution, taskId));
 

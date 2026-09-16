@@ -11,7 +11,8 @@
     "cleanup:video-ad": "tsx scripts/cleanup-video-ad.ts",
     "test:video-ad": "tsx scripts/test-video-ad.ts",
     "test:cloud-upload": "tsx scripts/test-cloud-upload.ts",
-    "test:cloud-render": "tsx scripts/test-cloud-render.ts"
+    "test:cloud-render": "tsx scripts/test-cloud-render.ts",
+    "test:magnific": "tsx scripts/test-magnific-models.ts"
   },
   "dependencies": {
     "@remotion/bundler": "4.0.524",

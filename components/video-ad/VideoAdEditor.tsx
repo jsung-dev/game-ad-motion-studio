@@ -12,7 +12,7 @@ import {
 import {
   CLOUD_MAX_UPLOAD_BYTES, createDefaultTextItem, MAX_GRAPHIC_BYTES, MAX_UPLOAD_BYTES, OUTPUT_FPS, OUTPUT_RATIOS,
   type AspectMode, type GraphicAsset, type GraphicItem, type MotionPreset, type OutputRatio,
-  type RenderJobStatus, type TextItem, type TextPosition, type VideoAdSequenceClip, type VideoAsset,
+  type RenderJobStatus, type SeedanceModel, type TextItem, type TextPosition, type VideoAdSequenceClip, type VideoAsset,
 } from "@/lib/video-ad/types";
 import { getDurationInFrames, getGraphicItemErrors, getItemErrors, validateEditorPayload } from "@/lib/video-ad/validation";
 import { VideoAdSequenceComposition } from "@/remotion/AdComposition";
@@ -34,6 +34,10 @@ type EditorClip = {
   prompt: string;
   version: number;
 };
+
+type ReferenceMedia =
+  | { id: string; kind: "image"; asset: GraphicAsset }
+  | { id: string; kind: "video"; asset: VideoAsset };
 
 type GenerationView = {
   id: string;
@@ -81,6 +85,22 @@ const seedanceRatios: Record<OutputRatio, string> = {
   "4:3": "classic_4_3",
   "3:4": "traditional_3_4",
   "9:16": "social_story_9_16",
+};
+const seedanceModelOptions: Record<SeedanceModel, {
+  label: string;
+  maxDuration: number;
+  supportsReferenceMedia: boolean;
+}> = {
+  "seedance-2-pro": {
+    label: "Seedance 2.0 Pro",
+    maxDuration: 15,
+    supportsReferenceMedia: false,
+  },
+  "seedance-2-5-pro": {
+    label: "Seedance 2.5 Pro",
+    maxDuration: 30,
+    supportsReferenceMedia: true,
+  },
 };
 const timelineTracks = [
   { key: "video", label: "영상", icon: Film },
@@ -249,6 +269,7 @@ export function VideoAdEditor() {
   const replaceTargetRef = useRef<string | null>(null);
   const graphicInputRef = useRef<HTMLInputElement>(null);
   const referenceImageInputRef = useRef<HTMLInputElement>(null);
+  const referenceMediaInputRef = useRef<HTMLInputElement>(null);
   const playerRef = useRef<PlayerRef>(null);
   const currentFrameRef = useRef(0);
   const previewSectionRef = useRef<HTMLElement>(null);
@@ -269,6 +290,10 @@ export function VideoAdEditor() {
   const [renderError, setRenderError] = useState<string | null>(null);
   const [referenceImage, setReferenceImage] = useState<GraphicAsset | null>(null);
   const [referenceImageError, setReferenceImageError] = useState<string | null>(null);
+  const [referenceMedia, setReferenceMedia] = useState<ReferenceMedia[]>([]);
+  const [referenceMediaUploading, setReferenceMediaUploading] = useState(false);
+  const [referenceMediaError, setReferenceMediaError] = useState<string | null>(null);
+  const [generationModel, setGenerationModel] = useState<SeedanceModel>("seedance-2-5-pro");
   const [job, setJob] = useState<JobView | null>(null);
   const [currentFrame, setCurrentFrame] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -280,6 +305,7 @@ export function VideoAdEditor() {
   const [generationSound, setGenerationSound] = useState(true);
   const [generationJob, setGenerationJob] = useState<GenerationView | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
+  const [generationSubmitting, setGenerationSubmitting] = useState(false);
   const appliedGenerationRef = useRef<string | null>(null);
 
   const selectedClip = clips.find((clip) => clip.id === selectedClipId) ?? null;
@@ -353,7 +379,38 @@ export function VideoAdEditor() {
     return errors;
   }, [asset, graphics, items, totalClipDuration]);
   const activeJob = job?.status === "queued" || job?.status === "rendering";
-  const activeGeneration = generationJob?.status === "generating" || generationJob?.status === "importing";
+  const activeGeneration = generationSubmitting || generationJob?.status === "generating" || generationJob?.status === "importing";
+  const generationModelConfig = seedanceModelOptions[generationModel];
+  const referenceImageCount = referenceMedia.filter((media) => media.kind === "image").length;
+  const referenceVideoCount = referenceMedia.filter((media) => media.kind === "video").length;
+  const referenceVideoDuration = referenceMedia.reduce(
+    (total, media) => total + (media.kind === "video" ? media.asset.metadata.duration : 0),
+    0,
+  );
+  const generationReferenceError = useMemo(() => {
+    if (generationDuration > generationModelConfig.maxDuration) {
+      return `\uD604\uC7AC \uBAA8\uB378\uC740 \uCD5C\uB300 ${generationModelConfig.maxDuration}\uCD08\uAE4C\uC9C0 \uC0DD\uC131\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.`;
+    }
+    if (referenceImage && referenceMedia.length) {
+      return "\uC2DC\uC791 \uC774\uBBF8\uC9C0\uC640 \uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4\uB294 \uD568\uAED8 \uC0AC\uC6A9\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uD558\uB098\uB9CC \uB0A8\uACA8 \uC8FC\uC138\uC694.";
+    }
+    if (generationModel === "seedance-2-pro" && referenceMedia.length) {
+      return "\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4\uB294 Seedance 2.5 Pro\uC5D0\uC11C\uB9CC \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.";
+    }
+    if (referenceImageCount > 30 || referenceVideoCount > 10) {
+      return "\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4 \uAC1C\uC218\uAC00 \uC81C\uD55C\uC744 \uCD08\uACFC\uD588\uC2B5\uB2C8\uB2E4.";
+    }
+    if (referenceVideoDuration > 30.001) {
+      return "\uB808\uD37C\uB7F0\uC2A4 \uC601\uC0C1\uC758 \uCD1D \uAE38\uC774\uB294 30\uCD08 \uC774\uD558\uC5EC\uC57C \uD569\uB2C8\uB2E4.";
+    }
+    return null;
+  }, [generationDuration, generationModel, generationModelConfig.maxDuration, referenceImage, referenceImageCount, referenceMedia.length, referenceVideoCount, referenceVideoDuration]);
+  useEffect(() => {
+    if (generationDuration > generationModelConfig.maxDuration) {
+      setGenerationDuration(generationModelConfig.maxDuration);
+    }
+  }, [generationDuration, generationModelConfig.maxDuration]);
+
 
   const timelineSegments = useMemo(() => {
     const video: Array<{ id: string; start: number; end: number }> = [];
@@ -785,20 +842,27 @@ export function VideoAdEditor() {
       setGenerationError("\uC601\uC0C1 \uC124\uBA85\uC744 \uC785\uB825\uD574 \uC8FC\uC138\uC694.");
       return;
     }
+    if (generationReferenceError) {
+      setGenerationError(generationReferenceError);
+      return;
+    }
     setGenerationError(null);
     appliedGenerationRef.current = null;
+    setGenerationSubmitting(true);
     try {
       const response = await fetch("/api/video-ad/generations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           targetClipId,
+          model: generationModel,
           prompt,
           duration: generationDuration,
           resolution: generationResolution,
           aspectRatio: seedanceRatios[outputRatio],
           soundEffects: generationSound,
           imageAssetId: referenceImage?.id ?? null,
+          referenceMedia: referenceMedia.map((media) => ({ kind: media.kind, assetId: media.asset.id })),
         }),
       });
       const created = await responseJson<GenerationView>(response);
@@ -806,6 +870,8 @@ export function VideoAdEditor() {
       localStorage.setItem(LAST_GENERATION_KEY, created.id);
     } catch (error) {
       setGenerationError(error instanceof Error ? error.message : "AI \uC601\uC0C1 \uC0DD\uC131\uC744 \uC2DC\uC791\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.");
+    } finally {
+      setGenerationSubmitting(false);
     }
   };
   const startSequencePlayback = () => {
@@ -869,6 +935,10 @@ export function VideoAdEditor() {
   };
   const uploadReferenceImage = async (file: File) => {
     setReferenceImageError(null);
+    if (referenceMedia.length) {
+      setReferenceImageError("\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4\uB97C \uBAA8\uB450 \uC81C\uAC70\uD55C \uD6C4 \uC2DC\uC791 \uC774\uBBF8\uC9C0\uB97C \uCD94\uAC00\uD574 \uC8FC\uC138\uC694.");
+      return;
+    }
     if (!CLOUD_UPLOADS_ENABLED) {
       setReferenceImageError("\uC2DC\uC791 \uC774\uBBF8\uC9C0 \uAE30\uB2A5\uC740 Supabase \uC800\uC7A5\uC18C\uAC00 \uC5F0\uACB0\uB41C \uBC30\uD3EC \uD658\uACBD\uC5D0\uC11C \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.");
       return;
@@ -893,6 +963,81 @@ export function VideoAdEditor() {
       setReferenceImageUploading(false);
       if (referenceImageInputRef.current) referenceImageInputRef.current.value = "";
     }
+  };
+
+  const uploadReferenceMedia = async (files: File[]) => {
+    if (!files.length) return;
+    setReferenceMediaError(null);
+    if (!CLOUD_UPLOADS_ENABLED) {
+      setReferenceMediaError("\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4\uB294 Supabase \uC800\uC7A5\uC18C\uAC00 \uC5F0\uACB0\uB41C \uBC30\uD3EC \uD658\uACBD\uC5D0\uC11C \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.");
+      return;
+    }
+    if (generationModel !== "seedance-2-5-pro") {
+      setReferenceMediaError("\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4\uB294 Seedance 2.5 Pro\uC5D0\uC11C\uB9CC \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.");
+      return;
+    }
+    if (referenceImage) {
+      setReferenceMediaError("\uC2DC\uC791 \uC774\uBBF8\uC9C0\uB97C \uC81C\uAC70\uD55C \uD6C4 \uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4\uB97C \uCD94\uAC00\uD574 \uC8FC\uC138\uC694.");
+      return;
+    }
+
+    setReferenceMediaUploading(true);
+    const added: ReferenceMedia[] = [];
+    const messages: string[] = [];
+    let imageCount = referenceImageCount;
+    let videoCount = referenceVideoCount;
+    let videoDuration = referenceVideoDuration;
+    try {
+      for (const file of files) {
+        const name = file.name.toLowerCase();
+        if (name.endsWith(".png")) {
+          if (file.size > MAX_GRAPHIC_BYTES) {
+            messages.push("PNG \uB808\uD37C\uB7F0\uC2A4\uB294 \uCD5C\uB300 10MB\uAE4C\uC9C0 \uC5C5\uB85C\uB4DC\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.");
+            continue;
+          }
+          if (imageCount >= 30) {
+            messages.push("\uC774\uBBF8\uC9C0 \uB808\uD37C\uB7F0\uC2A4\uB294 \uCD5C\uB300 30\uAC1C\uAE4C\uC9C0 \uCD94\uAC00\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.");
+            continue;
+          }
+          const result = await uploadToCloud<{ asset: GraphicAsset }>("graphic", file);
+          added.push({ id: crypto.randomUUID(), kind: "image", asset: result.asset });
+          imageCount += 1;
+          continue;
+        }
+        if (name.endsWith(".mp4")) {
+          if (file.size > CLOUD_MAX_UPLOAD_BYTES) {
+            messages.push("MP4 \uB808\uD37C\uB7F0\uC2A4\uB294 \uCD5C\uB300 50MB\uAE4C\uC9C0 \uC5C5\uB85C\uB4DC\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.");
+            continue;
+          }
+          if (videoCount >= 10) {
+            messages.push("\uC601\uC0C1 \uB808\uD37C\uB7F0\uC2A4\uB294 \uCD5C\uB300 10\uAC1C\uAE4C\uC9C0 \uCD94\uAC00\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.");
+            continue;
+          }
+          const result = await uploadToCloud<{ asset: VideoAsset }>("video", file);
+          const candidateDuration = result.asset.metadata.duration;
+          if (!Number.isFinite(candidateDuration) || candidateDuration < 2 || candidateDuration > 30) {
+            messages.push("\uC601\uC0C1 \uB808\uD37C\uB7F0\uC2A4\uB294 2\uCD08\uBD80\uD130 30\uCD08 \uC0AC\uC774\uC5EC\uC57C \uD569\uB2C8\uB2E4.");
+            continue;
+          }
+          if (videoDuration + candidateDuration > 30.001) {
+            messages.push("\uB808\uD37C\uB7F0\uC2A4 \uC601\uC0C1\uC758 \uCD1D \uAE38\uC774\uB294 30\uCD08 \uC774\uD558\uC5EC\uC57C \uD569\uB2C8\uB2E4.");
+            continue;
+          }
+          added.push({ id: crypto.randomUUID(), kind: "video", asset: result.asset });
+          videoCount += 1;
+          videoDuration += candidateDuration;
+          continue;
+        }
+        messages.push("\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4\uB294 PNG \uB610\uB294 MP4 \uD30C\uC77C\uB9CC \uCD94\uAC00\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.");
+      }
+    } catch (error) {
+      messages.push(error instanceof Error ? error.message : "\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4 \uC5C5\uB85C\uB4DC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4.");
+    } finally {
+      setReferenceMediaUploading(false);
+      if (referenceMediaInputRef.current) referenceMediaInputRef.current.value = "";
+    }
+    if (added.length) setReferenceMedia((current) => [...current, ...added]);
+    if (messages.length) setReferenceMediaError(messages.join("\n"));
   };
 
 
@@ -1194,9 +1339,35 @@ export function VideoAdEditor() {
 
             <div className={styles.aiGenerator}>
               <div className={styles.aiGeneratorHeader}>
-                <span><Sparkles size={14} /> Seedance 2.5 Pro</span>
+                <span><Sparkles size={14} /> {generationModelConfig.label}</span>
                 <em>API 크레딧 사용</em>
               </div>
+              <div className={styles.modelSelector} role="group" aria-label={"\uC0DD\uC131 \uBAA8\uB378 \uC120\uD0DD"}>
+                {(["seedance-2-pro", "seedance-2-5-pro"] as SeedanceModel[]).map((model) => {
+                  const option = seedanceModelOptions[model];
+                  const selected = generationModel === model;
+                  return (
+                    <button
+                      type="button"
+                      key={model}
+                      className={`${styles.modelOption} ${selected ? styles.modelOptionActive : ""}`}
+                      onClick={() => {
+                        setGenerationModel(model);
+                        setGenerationDuration((current) => Math.max(4, Math.min(option.maxDuration, current)));
+                        setGenerationError(null);
+                      }}
+                      disabled={activeGeneration || referenceImageUploading || referenceMediaUploading}
+                      aria-pressed={selected}
+                    >
+                      <span>{option.label}</span>
+                      <small>{option.supportsReferenceMedia
+                        ? "\uB808\uD37C\uB7F0\uC2A4 \uC774\uBBF8\uC9C0\u00B7\uC601\uC0C1 \uC0AC\uC6A9"
+                        : "\uD14D\uC2A4\uD2B8\u00B7\uC2DC\uC791 \uC774\uBBF8\uC9C0 \uC0AC\uC6A9"}</small>
+                    </button>
+                  );
+                })}
+              </div>
+
               <input
                 ref={referenceImageInputRef}
                 className={styles.hiddenInput}
@@ -1207,6 +1378,18 @@ export function VideoAdEditor() {
                   if (file) void uploadReferenceImage(file);
                 }}
               />
+              <input
+                ref={referenceMediaInputRef}
+                className={styles.hiddenInput}
+                type="file"
+                accept="image/png,.png,video/mp4,.mp4"
+                multiple
+                onChange={(event) => {
+                  const files = Array.from(event.target.files ?? []);
+                  if (files.length) void uploadReferenceMedia(files);
+                }}
+              />
+
               <div className={styles.referenceImage}>
                 <div className={styles.referenceImageMeta}>
                   {referenceImage ? (
@@ -1241,7 +1424,7 @@ export function VideoAdEditor() {
                     type="button"
                     className={styles.referenceImageButton}
                     onClick={() => referenceImageInputRef.current?.click()}
-                    disabled={activeGeneration || referenceImageUploading || !CLOUD_UPLOADS_ENABLED}
+                    disabled={activeGeneration || referenceImageUploading || referenceMediaUploading || !CLOUD_UPLOADS_ENABLED || referenceMedia.length > 0}
                   >
                     {referenceImageUploading ? <LoaderCircle className={styles.spin} size={12} /> : <ImageIcon size={12} />}
                     {referenceImageUploading ? "\uC5C5\uB85C\uB4DC \uC911" : "\uC2DC\uC791 \uC774\uBBF8\uC9C0 \uCD94\uAC00"}
@@ -1254,6 +1437,66 @@ export function VideoAdEditor() {
                   {"\uC774\uBBF8\uC9C0\uAC00 \uC788\uC73C\uBA74 \uC774\uBBF8\uC9C0\u2192\uC601\uC0C1\uC73C\uB85C \uC0DD\uC131\uB418\uBA70, \uACB0\uACFC \uBE44\uC728\uC740 \uC2DC\uC791 \uC774\uBBF8\uC9C0 \uBE44\uC728\uC744 \uB530\uB985\uB2C8\uB2E4."}
                 </small>
               )}
+              <section className={styles.referenceMedia}>
+                <div className={styles.referenceMediaHeader}>
+                  <div>
+                    <strong>{"\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4"}</strong>
+                    <span>{`PNG ${referenceImageCount}\uAC1C \u00B7 MP4 ${referenceVideoCount}\uAC1C`}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className={styles.referenceImageButton}
+                    onClick={() => referenceMediaInputRef.current?.click()}
+                    disabled={activeGeneration || referenceImageUploading || referenceMediaUploading || !CLOUD_UPLOADS_ENABLED || !generationModelConfig.supportsReferenceMedia || Boolean(referenceImage)}
+                  >
+                    {referenceMediaUploading ? <LoaderCircle className={styles.spin} size={12} /> : <UploadCloud size={12} />}
+                    {referenceMediaUploading ? "\uC5C5\uB85C\uB4DC \uC911" : "\uBBF8\uB514\uC5B4 \uCD94\uAC00"}
+                  </button>
+                </div>
+                {!generationModelConfig.supportsReferenceMedia && (
+                  <p className={styles.referenceMediaNotice}>{"\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4\uB294 Seedance 2.5 Pro\uC5D0\uC11C\uB9CC \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4."}</p>
+                )}
+                {referenceImage && (
+                  <p className={styles.referenceMediaNotice}>{"\uC2DC\uC791 \uC774\uBBF8\uC9C0 \uBAA8\uB4DC\uC640 \uB808\uD37C\uB7F0\uC2A4 \uBAA8\uB4DC\uB294 \uD568\uAED8 \uC0AC\uC6A9\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4."}</p>
+                )}
+                {referenceMedia.length ? (
+                  <div className={styles.referenceMediaList}>
+                    {referenceMedia.map((media, index) => {
+                      const ordinal = referenceMedia.slice(0, index + 1).filter((entry) => entry.kind === media.kind).length;
+                      const label = media.kind === "image" ? `@Image${ordinal}` : `@Video${ordinal}`;
+                      return (
+                        <article className={styles.referenceMediaItem} key={media.id}>
+                          {media.kind === "image" ? (
+                            <img className={styles.referenceMediaPreview} src={media.asset.sourceUrl} alt={label} />
+                          ) : (
+                            <video className={styles.referenceMediaPreview} src={media.asset.sourceUrl} muted playsInline preload="metadata" />
+                          )}
+                          <div>
+                            <strong>{label}</strong>
+                            <span title={media.asset.originalName}>{media.asset.originalName}</span>
+                            <small>{media.kind === "image"
+                              ? `${media.asset.width} \u00D7 ${media.asset.height}`
+                              : `${media.asset.metadata.duration.toFixed(2)}\uCD08 \u00B7 ${media.asset.metadata.width} \u00D7 ${media.asset.metadata.height}`}</small>
+                          </div>
+                          <button
+                            type="button"
+                            className={styles.referenceMediaRemove}
+                            aria-label={`${label} \uC81C\uAC70`}
+                            onClick={() => setReferenceMedia((current) => current.filter((entry) => entry.id !== media.id))}
+                            disabled={activeGeneration}
+                          ><Trash2 size={12} /></button>
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className={styles.referenceMediaEmpty}>{"PNG \uB610\uB294 MP4\uB97C \uCD94\uAC00\uD558\uBA74 \uC0DD\uC131 \uACB0\uACFC\uC5D0 \uC2A4\uD0C0\uC77C\uACFC \uB3D9\uC791\uC744 \uCC38\uC870\uD569\uB2C8\uB2E4."}</p>
+                )}
+                <small className={styles.referenceMediaHint}>{"\uD504\uB86C\uD504\uD2B8\uC5D0 @Image1, @Video1\uCC98\uB7FC \uC21C\uC11C\uBCC4 \uC774\uB984\uC744 \uC4F0\uBA74 \uD574\uB2F9 \uB808\uD37C\uB7F0\uC2A4\uB97C \uC9C0\uC815\uD574 \uC124\uBA85\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4."}</small>
+              </section>
+              {referenceMediaError && <p className={styles.referenceImageError} role="alert">{referenceMediaError}</p>}
+              {generationReferenceError && <p className={styles.referenceImageError} role="alert">{generationReferenceError}</p>}
+
               {selectedClip && (
                 <label className={styles.clipPrompt}>
                   <span>선택 컷 재생성 프롬프트</span>
@@ -1281,6 +1524,7 @@ export function VideoAdEditor() {
                 <label><span>화질</span><select value={generationResolution} disabled={activeGeneration} onChange={(event) => setGenerationResolution(event.target.value as "480p" | "720p" | "1080p")}><option value="480p">480p</option><option value="720p">720p</option><option value="1080p">1080p</option></select></label>
                 <label className={styles.aiSound}><input type="checkbox" checked={generationSound} disabled={activeGeneration} onChange={(event) => setGenerationSound(event.target.checked)} /><span>효과음 생성</span></label>
               </div>
+              <small className={styles.referenceMediaHint}>{`\uD604\uC7AC \uBAA8\uB378 \uC0DD\uC131 \uAE38\uC774: 4~${generationModelConfig.maxDuration}\uCD08`}</small>
               <div className={styles.aiActions}>
                 {selectedClip && <button type="button" disabled={activeGeneration || !selectedClip.prompt.trim()} onClick={() => void startAiGeneration(selectedClip.id)}><RefreshCw size={13} /> 선택 컷 다시 생성</button>}
                 <button type="button" disabled={activeGeneration || !newClipPrompt.trim()} onClick={() => void startAiGeneration(null)}><Sparkles size={13} /> 새 AI 컷 추가</button>

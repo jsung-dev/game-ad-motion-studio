@@ -76,7 +76,7 @@ export async function GET(_request: Request, context: Context) {
     return NextResponse.json(publicGenerationJob(job));
   }
   try {
-    const task = await getSeedanceTask(job.resolution, job.providerTaskId);
+    const task = await getSeedanceTask(job.model ?? "seedance-2-5-pro", job.resolution, job.providerTaskId);
     if (task.status === "FAILED") {
       job = await failJob(job, new Error("Seedance 생성 작업이 실패했습니다. 프롬프트를 조정해 다시 시도해 주세요."));
     } else if (task.status === "COMPLETED") {

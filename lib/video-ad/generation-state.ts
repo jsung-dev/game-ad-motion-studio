@@ -3,7 +3,7 @@ import path from "node:path";
 import { get, put } from "@vercel/blob";
 import type { SeedanceAspectRatio, SeedanceResolution } from "./magnific";
 import { assertSafeId, DATA_ROOT } from "./storage";
-import type { VideoAsset } from "./types";
+import type { SeedanceModel, VideoAsset } from "./types";
 
 export type GenerationStatus = "generating" | "importing" | "completed" | "failed";
 
@@ -16,6 +16,7 @@ export type GenerationJob = {
   duration: number;
   aspectRatio: SeedanceAspectRatio;
   resolution: SeedanceResolution;
+  model?: SeedanceModel;
   soundEffects: boolean;
   status: GenerationStatus;
   stage: string;
@@ -69,6 +70,7 @@ export const publicGenerationJob = (job: GenerationJob) => ({
   id: job.id,
   targetClipId: job.targetClipId,
   prompt: job.prompt,
+  model: job.model ?? "seedance-2-5-pro",
   status: job.status,
   stage: job.stage,
   error: job.error,

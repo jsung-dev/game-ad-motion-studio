@@ -10,6 +10,7 @@ export type TextPosition = "top" | "center" | "bottom";
 export type MotionPreset = "none" | "pop" | "slide-up" | "fade";
 export type AspectMode = "cover" | "contain";
 export type OutputRatio = "1:1" | "21:9" | "16:9" | "4:3" | "3:4" | "9:16";
+export type SeedanceModel = "seedance-2-pro" | "seedance-2-5-pro";
 
 export const OUTPUT_RATIOS: Record<OutputRatio, { width: number; height: number }> = {
   "1:1": { width: 720, height: 720 },

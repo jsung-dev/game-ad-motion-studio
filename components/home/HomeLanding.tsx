@@ -91,15 +91,34 @@ export function HomeLanding() {
                 <span><Layers3 size={12} aria-hidden="true" /> Copy</span>
               </aside>
               <div className={styles.previewCanvas}>
-                <div className={styles.portrait} aria-hidden="true">
-                  <span className={styles.previewCopy}>100{"\uC5F0 \uBF51\uAE30"}<br />{"\uBB34\uB8CC!"}</span>
-                  <span className={styles.previewBadge}>9:16</span>
+                <div className={styles.showcaseStage}>
+                  <video
+                    aria-label="\uAC8C\uC784 \uAD11\uACE0 \uC601\uC0C1 \uC2DC\uC548"
+                    autoPlay
+                    className={styles.showcaseVideo}
+                    loop
+                    muted
+                    playsInline
+                    poster="/showcase/game-ad-showcase-poster.jpg"
+                    preload="metadata"
+                  >
+                    <source src="/showcase/game-ad-showcase.mp4" type="video/mp4" />
+                  </video>
+                  <div className={styles.showcaseOverlay} aria-hidden="true" />
+                  <div className={styles.showcaseTop} aria-hidden="true">
+                    <span><i className={styles.liveDot} /> FINAL CUT</span>
+                    <span>00:16 / 30 FPS</span>
+                  </div>
+                  <div className={styles.showcaseBottom} aria-hidden="true">
+                    <strong>GAME AD<br />SHOWCASE</strong>
+                    <span>Motion / Copy / CTA</span>
+                  </div>
                 </div>
                 <div className={styles.timeline} aria-hidden="true">
-                  <div className={styles.timelineHeader}><span>00:00</span><span>00:12</span></div>
-                  <div className={styles.track}><span className={styles.videoTrack} /></div>
-                  <div className={styles.track}><span className={styles.copyTrack} /></div>
-                  <div className={styles.track}><span className={styles.effectTrack} /></div>
+                  <div className={styles.timelineHeader}><span>AD SEQUENCE</span><span>00:16</span></div>
+                  <div className={styles.timelineRow}><span className={styles.trackLabel}>V1</span><div className={styles.track}><span className={styles.videoTrack} /></div></div>
+                  <div className={styles.timelineRow}><span className={styles.trackLabel}>T1</span><div className={styles.track}><span className={styles.copyTrack} /></div></div>
+                  <div className={styles.timelineRow}><span className={styles.trackLabel}>FX</span><div className={styles.track}><span className={styles.effectTrack} /></div></div>
                 </div>
               </div>
             </div>

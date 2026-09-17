@@ -58,16 +58,60 @@
 .headerPrimary:disabled { border-color: #35394a; background: #292d3a; color: #6e7484; cursor: not-allowed; }
 
 .workspace {
-  display: grid;
-  grid-template-columns: minmax(340px, 380px) minmax(0, 1fr);
-  gap: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
   width: 100%;
   min-height: calc(100dvh - 64px);
   max-width: 1920px;
   margin: 0 auto;
   padding: 12px;
-  align-items: start;
 }
+.workspaceSectionNav {
+  width: min(100%, 960px);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 auto;
+}
+.workspaceSectionNav button {
+  min-width: 0;
+  min-height: 78px;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  align-items: center;
+  gap: 11px;
+  border: 1px solid #2d3444;
+  border-radius: 13px;
+  padding: 12px 14px;
+  color: #aab3c5;
+  background: #111620;
+  cursor: pointer;
+  text-align: left;
+  transition: transform .16s ease, border-color .16s ease, color .16s ease, background .16s ease;
+}
+.workspaceSectionNav button:hover { border-color: #59637a; color: #f0f2f8; background: #171d29; transform: translateY(-1px); }
+.workspaceSectionNav button > span:last-child { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.workspaceSectionIcon { width: 40px; height: 40px; display: grid; place-items: center; border: 1px solid #343d52; border-radius: 11px; color: #9aa6bb; background: #0c1018; }
+.workspaceSectionNav strong { color: inherit; font-size: 14px; font-weight: 800; letter-spacing: -.015em; }
+.workspaceSectionNav small { overflow: hidden; color: #7d879c; font-size: 10px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.workspaceSectionNav button.workspaceSectionActive { border-color: #7664ec; color: #f0edff; background: linear-gradient(145deg, #282047, #1b2133); box-shadow: inset 0 0 0 1px rgba(142, 121, 255, .12); }
+.workspaceSectionNav button.workspaceSectionActive .workspaceSectionIcon { border-color: #806deb; color: #c4b9ff; background: #211b3d; }
+.workspaceSectionNav button.workspaceSectionActive small { color: #c3bae7; }
+.workspaceViewHidden { display: none !important; }
+.workToolsWorkspace { width: 100%; display: flex; justify-content: center; }
+.workToolsWorkspace .editorColumn {
+  position: static;
+  display: block;
+  width: min(100%, 960px);
+  height: auto;
+  min-height: 0;
+  overflow: visible;
+}
+.workToolsWorkspace .toolModeNav { margin-bottom: 12px; }
+.workToolsWorkspace .toolModeList { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.workToolsWorkspace .toolModeList button:first-child { grid-column: 1 / -1; min-height: 86px; flex-direction: row; align-items: center; }
+.workToolsWorkspace .toolPanel { overflow: visible; padding-right: 0; }
 .editorColumn {
   grid-column: 1;
   position: sticky;
@@ -81,7 +125,7 @@
   overflow: hidden;
 }
 .editingWorkspace {
-  grid-column: 2;
+  width: 100%;
   min-width: 0;
   display: grid;
   grid-template-columns: minmax(500px, 1fr) 300px;
@@ -666,7 +710,6 @@
 
 @media (max-width: 1240px) {
   .header { grid-template-columns: 230px minmax(0, 1fr) auto; }
-  .workspace { grid-template-columns: minmax(300px, 335px) minmax(0, 1fr); }
   .editingWorkspace { grid-template-columns: minmax(430px, 1fr) 280px; }
   .itemList { grid-template-columns: 1fr; }
   .quickFieldGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -675,7 +718,6 @@
 @media (max-width: 1120px) {
   .header { grid-template-columns: 210px minmax(0, 1fr) auto; }
   .saveStatus { display: none; }
-  .workspace { grid-template-columns: 280px minmax(0, 1fr); }
   .editingWorkspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; }
   .editingWorkspaceHeading { grid-column: 1; grid-row: 1; }
   .canvasPanel { grid-column: 1; grid-row: 2; }
@@ -698,22 +740,27 @@
   .projectTitle { display: none; }
   .headerActions { gap: 5px; }
   .headerButton, .headerPrimary { height: 32px; padding: 0 9px; font-size: 0; }
-  .workspace { display: flex; flex-direction: column; gap: 14px; min-height: 0; padding: 10px; }
-  .editorColumn { order: 1; position: static; display: flex; flex-direction: column; gap: 10px; width: 100%; height: auto; max-height: none; overflow: visible; }
-  .editingWorkspace { order: 2; display: flex; flex-direction: column; width: 100%; gap: 10px; }
-  .editingWorkspaceHeading { align-items: flex-start; padding: 13px; }
-  .editingWorkspaceHeading h2 { font-size: 14px; }
-  .editingWorkspaceHeading p { font-size: 9px; }
-  .editingWorkspaceMeta { padding: 6px 8px; font-size: 9px; }
-  .toolModeNav { position: static; }
+  .workspace { gap: 10px; min-height: 0; padding: 10px; }
+  .workspaceSectionNav { gap: 7px; }
+  .workspaceSectionNav button { min-height: 66px; grid-template-columns: 32px minmax(0, 1fr); gap: 8px; padding: 9px; }
+  .workspaceSectionIcon { width: 32px; height: 32px; border-radius: 9px; }
+  .workspaceSectionNav strong { font-size: 12px; }
+  .workspaceSectionNav small { font-size: 9px; }
+  .workToolsWorkspace .editorColumn { width: 100%; }
+  .workToolsWorkspace .toolModeList button:first-child { min-height: 76px; }
   .toolModeHeading span { display: none; }
   .toolModeList button { min-height: 68px; padding: 9px; }
   .toolModeList button strong { font-size: 10px; }
   .toolModeList button small { font-size: 8px; }
   .toolPanel { overflow: visible; padding-right: 0; }
+  .editingWorkspace { display: flex; flex-direction: column; gap: 10px; }
+  .editingWorkspaceHeading { align-items: flex-start; padding: 13px; }
+  .editingWorkspaceHeading h2 { font-size: 14px; }
+  .editingWorkspaceHeading p { font-size: 9px; }
+  .editingWorkspaceMeta { padding: 6px 8px; font-size: 9px; }
   .previewColumn, .sticky { display: contents; }
-  .canvasPanel { order: 1; width: 100%; min-height: auto; grid-template-rows: 38px minmax(340px, 62vh) 46px 180px; }
-  .renderCard { order: 2; width: 100%; }
+  .canvasPanel { width: 100%; min-height: auto; grid-template-rows: 38px minmax(340px, 62vh) 46px 180px; }
+  .renderCard { width: 100%; }
   .canvasSurface { padding: 12px; }
   .playerShell { height: min(55vh, 500px); }
   .ratioGrid { grid-template-columns: repeat(3, 1fr); }
@@ -727,6 +774,7 @@
   .canvasPanel { grid-template-rows: 38px minmax(300px, 56vh) 46px 176px; }
   .editingWorkspaceHeading { display: block; }
   .editingWorkspaceMeta { display: inline-flex; margin-top: 9px; }
+  .workspaceSectionNav small { display: none; }
   .previewHeading > span { display: none; }
   .assetTools { gap: 5px; }
   .assetTools button { padding: 8px 6px; }

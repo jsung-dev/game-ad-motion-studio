@@ -86,6 +86,7 @@ type TimelineDrag = {
 };
 
 type EditorMode = "video" | "captions" | "generate";
+type WorkspaceView = "work" | "edit";
 
 const LAST_JOB_KEY = "video-ad:last-job";
 const LAST_GENERATION_KEY = "video-ad:last-generation";
@@ -373,6 +374,7 @@ export function VideoAdEditor() {
   const [items, setItems] = useState<TextItem[]>([]);
   const [graphics, setGraphics] = useState<GraphicItem[]>([]);
   const [activeEditorMode, setActiveEditorMode] = useState<EditorMode>("generate");
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("work");
   const [aspectMode, setAspectMode] = useState<AspectMode>("cover");
   const [outputRatio, setOutputRatio] = useState<OutputRatio>("9:16");
   const [uploading, setUploading] = useState(false);
@@ -1421,10 +1423,25 @@ export function VideoAdEditor() {
         </div>
         <div className={styles.headerActions}>
           <span className={styles.saveStatus}><CheckCircle2 size={14} /> 미리보기 자동 반영</span>
-          <button type="button" className={styles.headerButton} onClick={() => previewSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })}>
+          <button
+            type="button"
+            className={styles.headerButton}
+            onClick={() => {
+              setWorkspaceView("edit");
+              requestAnimationFrame(() => previewSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }));
+            }}
+          >
             <MonitorPlay size={16} /> 미리보기
           </button>
-          <button type="button" className={styles.headerPrimary} disabled={!asset || activeJob || editorErrors.length > 0} onClick={() => void startRender()}>
+          <button
+            type="button"
+            className={styles.headerPrimary}
+            disabled={!asset || activeJob || editorErrors.length > 0}
+            onClick={() => {
+              setWorkspaceView("edit");
+              void startRender();
+            }}
+          >
             {activeJob ? <LoaderCircle className={styles.spin} size={16} /> : <Film size={16} />}
             전체 영상 내보내기
           </button>
@@ -1432,7 +1449,41 @@ export function VideoAdEditor() {
       </header>
 
       <div className={styles.workspace}>
-        <section className={styles.editorColumn}>
+        <nav className={styles.workspaceSectionNav} aria-label={"\uC791\uC5C5\uACF5\uAC04 \uC120\uD0DD"}>
+          <button
+            type="button"
+            className={workspaceView === "work" ? styles.workspaceSectionActive : ""}
+            aria-pressed={workspaceView === "work"}
+            aria-controls="work-tools-workspace"
+            onClick={() => setWorkspaceView("work")}
+          >
+            <span className={styles.workspaceSectionIcon}><Sparkles size={20} /></span>
+            <span>
+              <strong>{"\uC791\uC5C5 \uB3C4\uAD6C"}</strong>
+              <small>{"AI \uCEF7\uC744 \uB9CC\uB4E4\uACE0 \uC601\uC0C1\uACFC \uB808\uC774\uC5B4\uB97C \uC900\uBE44\uD569\uB2C8\uB2E4."}</small>
+            </span>
+          </button>
+          <button
+            type="button"
+            className={workspaceView === "edit" ? styles.workspaceSectionActive : ""}
+            aria-pressed={workspaceView === "edit"}
+            aria-controls="editing-workspace"
+            onClick={() => setWorkspaceView("edit")}
+          >
+            <span className={styles.workspaceSectionIcon}><MonitorPlay size={20} /></span>
+            <span>
+              <strong>{"\uD3B8\uC9D1 \uB3C4\uAD6C"}</strong>
+              <small>{"\uBBF8\uB9AC\uBCF4\uAE30, \uD0C0\uC784\uB77C\uC778, \uCD9C\uB825 \uC124\uC815\uC744 \uC870\uC815\uD569\uB2C8\uB2E4."}</small>
+            </span>
+          </button>
+        </nav>
+        <section
+          id="work-tools-workspace"
+          className={[styles.workToolsWorkspace, workspaceView !== "work" ? styles.workspaceViewHidden : ""].filter(Boolean).join(" ")}
+          aria-label={"\uC791\uC5C5 \uB3C4\uAD6C"}
+          aria-hidden={workspaceView !== "work"}
+        >
+          <section className={styles.editorColumn}>
           <nav className={styles.toolModeNav} aria-label={"\uC791\uC5C5 \uB3C4\uAD6C \uC120\uD0DD"}>
             <div className={styles.toolModeHeading}>
               <strong>{"\uC791\uC5C5 \uB3C4\uAD6C"}</strong>
@@ -2044,9 +2095,15 @@ export function VideoAdEditor() {
 
           </div>
           </div>
+          </section>
         </section>
 
-        <section className={styles.editingWorkspace} aria-labelledby="editing-workspace-heading">
+        <section
+          id="editing-workspace"
+          className={[styles.editingWorkspace, workspaceView !== "edit" ? styles.workspaceViewHidden : ""].filter(Boolean).join(" ")}
+          aria-labelledby="editing-workspace-heading"
+          aria-hidden={workspaceView !== "edit"}
+        >
           <div className={styles.editingWorkspaceHeading}>
             <div>
               <span><MonitorPlay size={16} /> {"\uD3B8\uC9D1 \uB3C4\uAD6C"}</span>

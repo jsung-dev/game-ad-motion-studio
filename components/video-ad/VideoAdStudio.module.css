@@ -598,9 +598,9 @@
 .generationDraftActions > button:last-child:hover:not(:disabled) { border-color: #76424d; color: #ffabb4; background: #2b1920; }
 .generationDraftActions > button:disabled { color: #596173; cursor: not-allowed; }
 .generationDraftBody { border-top: 1px solid #2d3343; padding: 9px; }
-.generationDraftPrompt { margin-top: 0; }
+.generationDraftPrompt { margin-top: 10px; }
 .generationDraftPrompt textarea { min-height: 96px; padding: 10px; font-size: 10px; line-height: 1.5; }
-.generationDraftBody .modelSelector { margin-top: 10px; }
+.generationDraftBody .modelSelector { margin-top: 0; }
 .generationDraftBody .generationRatioSelector { margin-top: 10px; }
 .generationDraftBody .referenceImage { margin-top: 10px; }
 .generationDraftActionsPrimary { grid-template-columns: 1fr; }
@@ -663,11 +663,12 @@
 .editorColumn .modelOption { gap: 4px; padding: 10px; }
 .editorColumn .modelOption span { font-size: 11px; }
 .editorColumn .modelOption small { font-size: 9px; }
-.editorColumn .generationRatioSelector { margin-top: 12px; padding: 10px; }
+.editorColumn .generationRatioSelector { margin-top: 12px; padding: 8px; }
 .editorColumn .generationRatioSelector legend { font-size: 10px; }
-.editorColumn .generationRatioGrid { gap: 6px; }
-.editorColumn .generationRatioOption { min-height: 62px; gap: 6px; }
-.editorColumn .generationRatioOption strong { font-size: 10px; }
+.editorColumn .generationRatioGrid { grid-template-columns: repeat(auto-fit, minmax(78px, 92px)); justify-content: start; gap: 6px; }
+.editorColumn .generationRatioOption { min-height: 50px; gap: 4px; }
+.editorColumn .generationRatioOption strong { font-size: 9px; }
+.editorColumn .generationRatioIcon { width: min(22px, 54%); max-height: 20px; }
 .editorColumn .generationRatioNotice { margin-top: 8px; font-size: 9px; }
 .editorColumn .referenceImage, .editorColumn .referenceMedia { margin-top: 11px; padding: 10px; }
 .editorColumn .referenceImage { min-height: 62px; }

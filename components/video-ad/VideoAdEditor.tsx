@@ -1625,18 +1625,6 @@ export function VideoAdEditor() {
 
                         {card.expanded && (
                           <div className={styles.generationDraftBody}>
-                            <label className={[styles.clipPrompt, styles.generationDraftPrompt].join(" ")}>
-                              <span>{"\uC774 \uCEF7\uC758 \uC601\uC0C1 \uC124\uBA85"}</span>
-                              <textarea
-                                rows={5}
-                                value={card.prompt}
-                                placeholder={"\uC608: \uC5B4\uB450\uC6B4 \uB358\uC804\uC5D0\uC11C \uAC8C\uC784 \uCE90\uB9AD\uD130\uAC00 \uBCF4\uC2A4\uC640 \uACA9\uB82C\uD558\uB294 \uC5ED\uB3D9\uC801\uC778 \uC804\uD22C \uC7A5\uBA74"}
-                                onChange={(event) => updateGenerationCard(card.id, (current) => ({ ...current, prompt: event.target.value, error: null }))}
-                                disabled={busy}
-                              />
-                              <small>{"\uAC01 \uCEF7\uC758 \uACB0\uACFC\uB294 \uC544\uB798\uC758 \uCEF7 \uBC88\uD638 \uC21C\uC11C\uB300\uB85C \uD0C0\uC784\uB77C\uC778\uC5D0 \uC5F0\uACB0\uB429\uB2C8\uB2E4."}</small>
-                            </label>
-
                             <div className={styles.modelSelector} role="group" aria-label={"\uC0DD\uC131 \uBAA8\uB378 \uC120\uD0DD"}>
                               {(["seedance-2-pro", "seedance-2-5-pro"] as SeedanceModel[]).map((model) => {
                                 const option = seedanceModelOptions[model];
@@ -1661,29 +1649,6 @@ export function VideoAdEditor() {
                                 );
                               })}
                             </div>
-
-                            <fieldset className={styles.generationRatioSelector}>
-                              <legend>{"\uC0DD\uC131 \uD654\uBA74 \uBE44\uC728"}</legend>
-                              <div className={styles.generationRatioGrid} role="group" aria-label={"\uC0DD\uC131 \uD654\uBA74 \uBE44\uC728"}>
-                                {seedanceAspectRatioOptions.map((option) => {
-                                  const selected = card.aspectRatio === option.value;
-                                  return (
-                                    <button
-                                      type="button"
-                                      key={option.value}
-                                      className={[styles.generationRatioOption, selected ? styles.generationRatioOptionActive : ""].filter(Boolean).join(" ")}
-                                      onClick={() => updateGenerationCard(card.id, (current) => ({ ...current, aspectRatio: option.value, error: null }))}
-                                      disabled={busy || Boolean(card.referenceImage)}
-                                      aria-pressed={selected}
-                                    >
-                                      <span className={styles.generationRatioIcon} style={{ aspectRatio: option.visualRatio }} />
-                                      <strong>{option.label}</strong>
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                              {card.referenceImage && <small className={styles.generationRatioNotice}>{"\uC2DC\uC791 \uC774\uBBF8\uC9C0\uB97C \uC4F0\uBA74 \uC774\uBBF8\uC9C0 \uC6D0\uBCF8 \uBE44\uC728\uC774 \uC801\uC6A9\uB429\uB2C8\uB2E4."}</small>}
-                            </fieldset>
 
                             <div className={styles.referenceImage}>
                               <div className={styles.referenceImageMeta}>
@@ -1755,12 +1720,48 @@ export function VideoAdEditor() {
                             {card.referenceMediaError && <p className={styles.referenceImageError} role="alert">{card.referenceMediaError}</p>}
                             {referenceError && <p className={styles.referenceImageError} role="alert">{referenceError}</p>}
 
+                            <label className={[styles.clipPrompt, styles.generationDraftPrompt].join(" ")}>
+                              <span>{"\uC774 \uCEF7\uC758 \uC601\uC0C1 \uC124\uBA85"}</span>
+                              <textarea
+                                rows={5}
+                                value={card.prompt}
+                                placeholder={"\uC608: \uC5B4\uB450\uC6B4 \uB358\uC804\uC5D0\uC11C \uAC8C\uC784 \uCE90\uB9AD\uD130\uAC00 \uBCF4\uC2A4\uC640 \uACA9\uB82C\uD558\uB294 \uC5ED\uB3D9\uC801\uC778 \uC804\uD22C \uC7A5\uBA74"}
+                                onChange={(event) => updateGenerationCard(card.id, (current) => ({ ...current, prompt: event.target.value, error: null }))}
+                                disabled={busy}
+                              />
+                              <small>{"\uAC01 \uCEF7\uC758 \uACB0\uACFC\uB294 \uC544\uB798\uC758 \uCEF7 \uBC88\uD638 \uC21C\uC11C\uB300\uB85C \uD0C0\uC784\uB77C\uC778\uC5D0 \uC5F0\uACB0\uB429\uB2C8\uB2E4."}</small>
+                            </label>
+
+                            <fieldset className={styles.generationRatioSelector}>
+                              <legend>{"\uC0DD\uC131 \uD654\uBA74 \uBE44\uC728"}</legend>
+                              <div className={styles.generationRatioGrid} role="group" aria-label={"\uC0DD\uC131 \uD654\uBA74 \uBE44\uC728"}>
+                                {seedanceAspectRatioOptions.map((option) => {
+                                  const selected = card.aspectRatio === option.value;
+                                  return (
+                                    <button
+                                      type="button"
+                                      key={option.value}
+                                      className={[styles.generationRatioOption, selected ? styles.generationRatioOptionActive : ""].filter(Boolean).join(" ")}
+                                      onClick={() => updateGenerationCard(card.id, (current) => ({ ...current, aspectRatio: option.value, error: null }))}
+                                      disabled={busy || Boolean(card.referenceImage)}
+                                      aria-pressed={selected}
+                                    >
+                                      <span className={styles.generationRatioIcon} style={{ aspectRatio: option.visualRatio }} />
+                                      <strong>{option.label}</strong>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              {card.referenceImage && <small className={styles.generationRatioNotice}>{"\uC2DC\uC791 \uC774\uBBF8\uC9C0\uB97C \uC4F0\uBA74 \uC774\uBBF8\uC9C0 \uC6D0\uBCF8 \uBE44\uC728\uC774 \uC801\uC6A9\uB429\uB2C8\uB2E4."}</small>}
+                            </fieldset>
+
                             <div className={styles.aiOptions}>
                               <label><span>{"\uAE38\uC774"}</span><input type="number" min={4} max={modelConfig.maxDuration} step={1} value={card.duration} disabled={busy} onChange={(event) => updateGenerationCard(card.id, (current) => ({ ...current, duration: Math.max(4, Math.min(modelConfig.maxDuration, Math.round(Number(event.target.value) || 4))), error: null }))} /></label>
                               <label><span>{"\uD654\uC9C8"}</span><select value={card.resolution} disabled={busy} onChange={(event) => updateGenerationCard(card.id, (current) => ({ ...current, resolution: event.target.value as SeedanceResolution, error: null }))}><option value="480p">480p</option><option value="720p">720p</option><option value="1080p">1080p</option></select></label>
                               <label className={styles.aiSound}><input type="checkbox" checked={card.soundEffects} disabled={busy} onChange={(event) => updateGenerationCard(card.id, (current) => ({ ...current, soundEffects: event.target.checked, error: null }))} /><span>{"\uD6A8\uACFC\uC74C \uC0DD\uC131"}</span></label>
                             </div>
                             <small className={styles.referenceMediaHint}>{"\uD604\uC7AC \uBAA8\uB378 \uC0DD\uC131 \uAE38\uC774: 4~"}{modelConfig.maxDuration}{"\uCD08"}</small>
+
                             <div className={[styles.aiActions, styles.generationDraftActionsPrimary].filter(Boolean).join(" ")}>
                               <button
                                 type="button"

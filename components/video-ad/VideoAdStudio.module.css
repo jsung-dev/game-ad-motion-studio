@@ -478,8 +478,6 @@
 .page button:focus-visible, .page input:focus-visible, .page select:focus-visible, .page textarea:focus-visible, .page summary:focus-visible { outline: 2px solid #8a78f6; outline-offset: 2px; }
 
 
-.captionAddButton { min-height: 34px; border-color: #6656d2 !important; color: #e1dcff !important; background: #252040 !important; }
-.captionAddButton:hover:not(:disabled) { border-color: #8a78f2 !important; background: #302750 !important; }
 .captionInputHint { margin: 11px 0 0; border: 1px solid #3e3960; border-radius: 9px; padding: 9px 10px; color: #bab2e7; background: #17152a; font-size: 9px; line-height: 1.5; }
 .itemList { grid-template-columns: 1fr; gap: 12px; }
 .textCard { padding: 16px; }

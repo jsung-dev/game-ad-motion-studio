@@ -1534,14 +1534,23 @@ export function VideoAdEditor() {
                     if (file) void uploadGraphic(file);
                   }}
                 />
-                <button type="button" className={styles.captionAddButton} onClick={addItem} disabled={!clips.length || items.length >= 20}>
-                  <Type size={15} />
-                  {"\uC790\uB9C9 \uCD94\uAC00"}
-                </button>
+
                 <button type="button" onClick={addExamples} disabled={!clips.length || items.length > 17}>
                   <Sparkles size={15} /> 예제 3개 추가
                 </button>
               </div>
+            </div>
+
+            <div className={styles.assetTools} aria-label="에셋 추가 도구">
+              <button type="button" onClick={() => { setActiveEditorMode("captions"); requestAnimationFrame(() => graphicInputRef.current?.click()); }} disabled={!asset || graphicUploading || graphics.length >= 10}>
+                {graphicUploading ? <LoaderCircle className={styles.spin} size={17} /> : <ImageIcon size={17} />}<span>PNG 글자</span><small>투명 이미지</small>
+              </button>
+              <button type="button" disabled title="배경 제거 기능은 준비 중입니다">
+                <Sparkles size={17} /><span>배경 제거</span><small>준비 중</small>
+              </button>
+              <button type="button" onClick={() => { setActiveEditorMode("captions"); addItem(); }} disabled={!clips.length || items.length >= 20}>
+                <Type size={17} /><span>문구 추가</span><small>전체 타임라인</small>
+              </button>
             </div>
 
             {clips.length > 0 && (
@@ -1814,17 +1823,7 @@ export function VideoAdEditor() {
               </div>
             )}
 
-            <div className={styles.assetTools} aria-label="에셋 추가 도구">
-              <button type="button" onClick={() => { setActiveEditorMode("captions"); requestAnimationFrame(() => graphicInputRef.current?.click()); }} disabled={!asset || graphicUploading || graphics.length >= 10}>
-                {graphicUploading ? <LoaderCircle className={styles.spin} size={17} /> : <ImageIcon size={17} />}<span>PNG 글자</span><small>투명 이미지</small>
-              </button>
-              <button type="button" disabled title="배경 제거 기능은 준비 중입니다">
-                <Sparkles size={17} /><span>배경 제거</span><small>준비 중</small>
-              </button>
-              <button type="button" onClick={() => { setActiveEditorMode("captions"); addItem(); }} disabled={!clips.length || items.length >= 20}>
-                <Type size={17} /><span>문구 추가</span><small>전체 타임라인</small>
-              </button>
-            </div>
+
           </div>
           </div>
         </section>

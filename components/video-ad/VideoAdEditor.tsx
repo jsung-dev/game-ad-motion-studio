@@ -134,6 +134,8 @@ const seedanceModelOptions: Record<SeedanceModel, {
     supportsReferenceMedia: true,
   },
 };
+const decodeUnicodeEscapes = (value: string) => value.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
+
 const createGenerationCard = (id: string, expanded = false): GenerationCard => ({
   id,
   prompt: "",
@@ -552,7 +554,7 @@ export function VideoAdEditor() {
                 return {
                   ...base,
                   ...card,
-                  prompt: typeof card.prompt === "string" ? card.prompt : base.prompt,
+                  prompt: typeof card.prompt === "string" ? decodeUnicodeEscapes(card.prompt) : base.prompt,
                   model: card.model === "seedance-2-pro" || card.model === "seedance-2-5-pro" ? card.model : base.model,
                   aspectRatio: card.aspectRatio ?? base.aspectRatio,
                   duration: typeof card.duration === "number" ? card.duration : base.duration,
@@ -1457,12 +1459,17 @@ export function VideoAdEditor() {
             aria-controls="work-tools-workspace"
             onClick={() => setWorkspaceView("work")}
           >
+            <span className={styles.workspaceStepBadge} aria-hidden="true">1</span>
             <span className={styles.workspaceSectionIcon}><Sparkles size={20} /></span>
-            <span>
+            <span className={styles.workspaceSectionCopy}>
               <strong>{"\uC791\uC5C5 \uB3C4\uAD6C"}</strong>
               <small>{"AI \uCEF7\uC744 \uB9CC\uB4E4\uACE0 \uC601\uC0C1\uACFC \uB808\uC774\uC5B4\uB97C \uC900\uBE44\uD569\uB2C8\uB2E4."}</small>
             </span>
           </button>
+          <span className={styles.workspaceStepArrow} aria-hidden="true">
+            <small>{"\uB2E4\uC74C"}</small>
+            <ChevronRight size={20} />
+          </span>
           <button
             type="button"
             className={workspaceView === "edit" ? styles.workspaceSectionActive : ""}
@@ -1470,8 +1477,9 @@ export function VideoAdEditor() {
             aria-controls="editing-workspace"
             onClick={() => setWorkspaceView("edit")}
           >
+            <span className={styles.workspaceStepBadge} aria-hidden="true">2</span>
             <span className={styles.workspaceSectionIcon}><MonitorPlay size={20} /></span>
-            <span>
+            <span className={styles.workspaceSectionCopy}>
               <strong>{"\uD3B8\uC9D1 \uB3C4\uAD6C"}</strong>
               <small>{"\uBBF8\uB9AC\uBCF4\uAE30, \uD0C0\uC784\uB77C\uC778, \uCD9C\uB825 \uC124\uC815\uC744 \uC870\uC815\uD569\uB2C8\uB2E4."}</small>
             </span>
@@ -1603,12 +1611,12 @@ export function VideoAdEditor() {
                           </button>
                           <div className={styles.generationDraftActions}>
                             {cardClip && (
-                              <button type="button" title="\uD0C0\uC784\uB77C\uC778\uC5D0\uC11C \uBCF4\uAE30" onClick={() => selectClip(cardClip.id)}><MonitorPlay size={13} /></button>
+                              <button type="button" title={"\uD0C0\uC784\uB77C\uC778\uC5D0\uC11C \uBCF4\uAE30"} onClick={() => selectClip(cardClip.id)}><MonitorPlay size={13} /></button>
                             )}
                             <button
                               type="button"
                               title={busy ? "\uC0DD\uC131 \uC911\uC5D0\uB294 \uC0AD\uC81C\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4." : "\uCEF7 \uC0AD\uC81C"}
-                              aria-label="\uCEF7 \uC0AD\uC81C"
+                              aria-label={"\uCEF7 \uC0AD\uC81C"}
                               onClick={() => removeGenerationCard(card.id)}
                               disabled={busy}
                             ><Trash2 size={13} /></button>
@@ -1622,14 +1630,14 @@ export function VideoAdEditor() {
                               <textarea
                                 rows={5}
                                 value={card.prompt}
-                                placeholder="\uC608: \uC5B4\uB450\uC6B4 \uB358\uC804\uC5D0\uC11C \uAC8C\uC784 \uCE90\uB9AD\uD130\uAC00 \uBCF4\uC2A4\uC640 \uACA9\uB82C\uD558\uB294 \uC5ED\uB3D9\uC801\uC778 \uC804\uD22C \uC7A5\uBA74"
+                                placeholder={"\uC608: \uC5B4\uB450\uC6B4 \uB358\uC804\uC5D0\uC11C \uAC8C\uC784 \uCE90\uB9AD\uD130\uAC00 \uBCF4\uC2A4\uC640 \uACA9\uB82C\uD558\uB294 \uC5ED\uB3D9\uC801\uC778 \uC804\uD22C \uC7A5\uBA74"}
                                 onChange={(event) => updateGenerationCard(card.id, (current) => ({ ...current, prompt: event.target.value, error: null }))}
                                 disabled={busy}
                               />
                               <small>{"\uAC01 \uCEF7\uC758 \uACB0\uACFC\uB294 \uC544\uB798\uC758 \uCEF7 \uBC88\uD638 \uC21C\uC11C\uB300\uB85C \uD0C0\uC784\uB77C\uC778\uC5D0 \uC5F0\uACB0\uB429\uB2C8\uB2E4."}</small>
                             </label>
 
-                            <div className={styles.modelSelector} role="group" aria-label="\uC0DD\uC131 \uBAA8\uB378 \uC120\uD0DD">
+                            <div className={styles.modelSelector} role="group" aria-label={"\uC0DD\uC131 \uBAA8\uB378 \uC120\uD0DD"}>
                               {(["seedance-2-pro", "seedance-2-5-pro"] as SeedanceModel[]).map((model) => {
                                 const option = seedanceModelOptions[model];
                                 const selected = card.model === model;
@@ -1656,7 +1664,7 @@ export function VideoAdEditor() {
 
                             <fieldset className={styles.generationRatioSelector}>
                               <legend>{"\uC0DD\uC131 \uD654\uBA74 \uBE44\uC728"}</legend>
-                              <div className={styles.generationRatioGrid} role="group" aria-label="\uC0DD\uC131 \uD654\uBA74 \uBE44\uC728">
+                              <div className={styles.generationRatioGrid} role="group" aria-label={"\uC0DD\uC131 \uD654\uBA74 \uBE44\uC728"}>
                                 {seedanceAspectRatioOptions.map((option) => {
                                   const selected = card.aspectRatio === option.value;
                                   return (
@@ -1680,7 +1688,7 @@ export function VideoAdEditor() {
                             <div className={styles.referenceImage}>
                               <div className={styles.referenceImageMeta}>
                                 {card.referenceImage ? (
-                                  <img className={styles.referenceImageThumbnail} src={card.referenceImage.sourceUrl} alt="\uC2DC\uC791 \uC774\uBBF8\uC9C0 \uBBF8\uB9AC\uBCF4\uAE30" />
+                                  <img className={styles.referenceImageThumbnail} src={card.referenceImage.sourceUrl} alt={"\uC2DC\uC791 \uC774\uBBF8\uC9C0 \uBBF8\uB9AC\uBCF4\uAE30"} />
                                 ) : (
                                   <span className={styles.referenceImagePlaceholder}><ImageIcon size={16} /></span>
                                 )}

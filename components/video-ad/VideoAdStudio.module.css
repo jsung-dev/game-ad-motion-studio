@@ -68,9 +68,9 @@
   padding: 12px;
 }
 .workspaceSectionNav {
-  width: min(100%, 960px);
+  width: min(100%, 1480px);
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr) 52px minmax(0, 1fr);
   gap: 10px;
   margin: 0 auto;
 }
@@ -78,7 +78,7 @@
   min-width: 0;
   min-height: 78px;
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr);
+  grid-template-columns: 25px 40px minmax(0, 1fr);
   align-items: center;
   gap: 11px;
   border: 1px solid #2d3444;
@@ -91,7 +91,11 @@
   transition: transform .16s ease, border-color .16s ease, color .16s ease, background .16s ease;
 }
 .workspaceSectionNav button:hover { border-color: #59637a; color: #f0f2f8; background: #171d29; transform: translateY(-1px); }
-.workspaceSectionNav button > span:last-child { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.workspaceSectionCopy { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.workspaceStepBadge { width: 25px; height: 25px; display: grid; place-items: center; border: 1px solid #3a4359; border-radius: 999px; color: #9da9bf; background: #0c1018; font-size: 11px; font-weight: 850; font-variant-numeric: tabular-nums; }
+.workspaceStepArrow { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: #8978e7; }
+.workspaceStepArrow small { color: #777f94; font-size: 9px; font-weight: 720; }
+.workspaceSectionNav button.workspaceSectionActive .workspaceStepBadge { border-color: #8a78ef; color: #f0edff; background: #302654; }
 .workspaceSectionIcon { width: 40px; height: 40px; display: grid; place-items: center; border: 1px solid #343d52; border-radius: 11px; color: #9aa6bb; background: #0c1018; }
 .workspaceSectionNav strong { color: inherit; font-size: 14px; font-weight: 800; letter-spacing: -.015em; }
 .workspaceSectionNav small { overflow: hidden; color: #7d879c; font-size: 10px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
@@ -103,7 +107,7 @@
 .workToolsWorkspace .editorColumn {
   position: static;
   display: block;
-  width: min(100%, 960px);
+  width: min(100%, 1480px);
   height: auto;
   min-height: 0;
   overflow: visible;
@@ -742,8 +746,12 @@
   .headerButton, .headerPrimary { height: 32px; padding: 0 9px; font-size: 0; }
   .workspace { gap: 10px; min-height: 0; padding: 10px; }
   .workspaceSectionNav { gap: 7px; }
-  .workspaceSectionNav button { min-height: 66px; grid-template-columns: 32px minmax(0, 1fr); gap: 8px; padding: 9px; }
+  .workspaceSectionNav { grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr); }
+  .workspaceSectionNav button { min-height: 66px; grid-template-columns: 22px 32px minmax(0, 1fr); gap: 8px; padding: 9px; }
   .workspaceSectionIcon { width: 32px; height: 32px; border-radius: 9px; }
+  .workspaceStepBadge { width: 22px; height: 22px; font-size: 10px; }
+  .workspaceStepArrow svg { width: 18px; height: 18px; }
+  .workspaceStepArrow small { font-size: 8px; }
   .workspaceSectionNav strong { font-size: 12px; }
   .workspaceSectionNav small { font-size: 9px; }
   .workToolsWorkspace .editorColumn { width: 100%; }

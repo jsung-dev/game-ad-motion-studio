@@ -6,7 +6,7 @@ import { createClient } from "@supabase/supabase-js";
 import {
   AlertTriangle, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Download, Film, ImageIcon,
   Layers3, LoaderCircle, Maximize2, MonitorPlay, Pause, Play, Settings2,
-  RefreshCw, SkipBack, SkipForward, Sparkles, Trash2, Type,
+  Plus, RefreshCw, SkipBack, SkipForward, Sparkles, Trash2, Type,
   UploadCloud, Volume2, VolumeX,
 } from "lucide-react";
 import {
@@ -14,7 +14,7 @@ import {
   type AspectMode, type GraphicAsset, type GraphicItem, type MotionPreset, type OutputRatio,
   type RenderJobStatus, type SeedanceModel, type TextItem, type TextPosition, type VideoAdSequenceClip, type VideoAsset,
 } from "@/lib/video-ad/types";
-import type { SeedanceAspectRatio } from "@/lib/video-ad/magnific";
+import type { SeedanceAspectRatio, SeedanceResolution } from "@/lib/video-ad/magnific";
 import { getDurationInFrames, getGraphicItemErrors, getItemErrors, validateEditorPayload } from "@/lib/video-ad/validation";
 import { VideoAdSequenceComposition } from "@/remotion/AdComposition";
 import styles from "./VideoAdStudio.module.css";
@@ -34,6 +34,7 @@ type EditorClip = {
   fileSize: number;
   prompt: string;
   version: number;
+  generationCardId?: string;
 };
 
 type ReferenceMedia =
@@ -49,6 +50,26 @@ type GenerationView = {
   error: string | null;
   asset: VideoAsset | null;
   fileSize: number | null;
+};
+
+type GenerationCard = {
+  id: string;
+  prompt: string;
+  model: SeedanceModel;
+  aspectRatio: SeedanceAspectRatio;
+  duration: number;
+  resolution: SeedanceResolution;
+  soundEffects: boolean;
+  referenceImage: GraphicAsset | null;
+  referenceMedia: ReferenceMedia[];
+  job: GenerationView | null;
+  error: string | null;
+  referenceImageError: string | null;
+  referenceMediaError: string | null;
+  referenceImageUploading: boolean;
+  referenceMediaUploading: boolean;
+  isSubmitting: boolean;
+  expanded: boolean;
 };
 
 type EditableTimelineTrack = "text" | "image";
@@ -68,6 +89,8 @@ type EditorMode = "video" | "captions" | "generate";
 
 const LAST_JOB_KEY = "video-ad:last-job";
 const LAST_GENERATION_KEY = "video-ad:last-generation";
+const GENERATION_CARDS_KEY = "video-ad:generation-cards";
+const GENERATION_CARD_LIMIT = 8;
 const CLOUD_UPLOADS_ENABLED = process.env.NEXT_PUBLIC_VIDEO_STORAGE_MODE === "supabase";
 const motions: Array<{ value: MotionPreset; label: string }> = [
   { value: "none", label: "모션 없음" },
@@ -110,6 +133,65 @@ const seedanceModelOptions: Record<SeedanceModel, {
     supportsReferenceMedia: true,
   },
 };
+const createGenerationCard = (id: string, expanded = false): GenerationCard => ({
+  id,
+  prompt: "",
+  model: "seedance-2-5-pro",
+  aspectRatio: "social_story_9_16",
+  duration: 5,
+  resolution: "720p",
+  soundEffects: true,
+  referenceImage: null,
+  referenceMedia: [],
+  job: null,
+  error: null,
+  referenceImageError: null,
+  referenceMediaError: null,
+  referenceImageUploading: false,
+  referenceMediaUploading: false,
+  isSubmitting: false,
+  expanded,
+});
+
+const isGenerationCardBusy = (card: GenerationCard) => (
+  card.isSubmitting || card.job?.status === "generating" || card.job?.status === "importing"
+);
+
+const getGenerationCardReferenceError = (card: GenerationCard) => {
+  const config = seedanceModelOptions[card.model];
+  const imageCount = card.referenceMedia.filter((media) => media.kind === "image").length;
+  const videoCount = card.referenceMedia.filter((media) => media.kind === "video").length;
+  const videoDuration = card.referenceMedia.reduce(
+    (total, media) => total + (media.kind === "video" ? media.asset.metadata.duration : 0),
+    0,
+  );
+  if (card.duration > config.maxDuration) {
+    return "\uD604\uC7AC \uBAA8\uB378\uC740 \uCD5C\uB300 " + config.maxDuration + "\uCD08\uAE4C\uC9C0 \uC0DD\uC131\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.";
+  }
+  if (card.referenceImage && card.referenceMedia.length) {
+    return "\uC2DC\uC791 \uC774\uBBF8\uC9C0\uC640 \uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4\uB294 \uD568\uAED8 \uC0AC\uC6A9\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uD558\uB098\uB9CC \uB0A8\uACA8 \uC8FC\uC138\uC694.";
+  }
+  if (card.model === "seedance-2-pro" && card.referenceMedia.length) {
+    return "\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4\uB294 Seedance 2.5 Pro\uC5D0\uC11C\uB9CC \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.";
+  }
+  if (imageCount > 30 || videoCount > 10) {
+    return "\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4 \uAC1C\uC218\uAC00 \uC81C\uD55C\uC744 \uCD08\uACFC\uD588\uC2B5\uB2C8\uB2E4.";
+  }
+  if (videoDuration > 30.001) {
+    return "\uB808\uD37C\uB7F0\uC2A4 \uC601\uC0C1\uC758 \uCD1D \uAE38\uC774\uB294 30\uCD08 \uC774\uD558\uC5EC\uC57C \uD569\uB2C8\uB2E4.";
+  }
+  return null;
+};
+
+const generationStatusLabel = (card: GenerationCard) => {
+  if (card.isSubmitting) return "\uC694\uCCAD \uC911";
+  if (card.job?.status === "generating") return "\uC0DD\uC131 \uC911";
+  if (card.job?.status === "importing") return "\uAC00\uC838\uC624\uB294 \uC911";
+  if (card.job?.status === "completed") return "\uC644\uB8CC";
+  if (card.job?.status === "failed") return "\uC2E4\uD328";
+  return "\uC791\uC131 \uC911";
+};
+
 const timelineTracks = [
   { key: "video", label: "영상", icon: Film },
   { key: "image", label: "이미지", icon: ImageIcon },
@@ -278,6 +360,9 @@ export function VideoAdEditor() {
   const graphicInputRef = useRef<HTMLInputElement>(null);
   const referenceImageInputRef = useRef<HTMLInputElement>(null);
   const referenceMediaInputRef = useRef<HTMLInputElement>(null);
+  const generationUploadTargetRef = useRef<{ cardId: string; kind: "image" | "media" } | null>(null);
+  const generationPollInFlightRef = useRef(new Set<string>());
+  const appliedGenerationJobIdsRef = useRef(new Set<string>());
   const playerRef = useRef<PlayerRef>(null);
   const currentFrameRef = useRef(0);
   const previewSectionRef = useRef<HTMLElement>(null);
@@ -292,31 +377,18 @@ export function VideoAdEditor() {
   const [outputRatio, setOutputRatio] = useState<OutputRatio>("9:16");
   const [uploading, setUploading] = useState(false);
   const [graphicUploading, setGraphicUploading] = useState(false);
-  const [referenceImageUploading, setReferenceImageUploading] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [graphicError, setGraphicError] = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
-  const [referenceImage, setReferenceImage] = useState<GraphicAsset | null>(null);
-  const [referenceImageError, setReferenceImageError] = useState<string | null>(null);
-  const [referenceMedia, setReferenceMedia] = useState<ReferenceMedia[]>([]);
-  const [referenceMediaUploading, setReferenceMediaUploading] = useState(false);
-  const [referenceMediaError, setReferenceMediaError] = useState<string | null>(null);
-  const [generationModel, setGenerationModel] = useState<SeedanceModel>("seedance-2-5-pro");
-  const [generationAspectRatio, setGenerationAspectRatio] = useState<SeedanceAspectRatio>("social_story_9_16");
   const [job, setJob] = useState<JobView | null>(null);
   const [currentFrame, setCurrentFrame] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [snapGuide, setSnapGuide] = useState<number | null>(null);
-  const [newClipPrompt, setNewClipPrompt] = useState("");
-  const [generationDuration, setGenerationDuration] = useState(5);
-  const [generationResolution, setGenerationResolution] = useState<"480p" | "720p" | "1080p">("720p");
-  const [generationSound, setGenerationSound] = useState(true);
-  const [generationJob, setGenerationJob] = useState<GenerationView | null>(null);
-  const [generationError, setGenerationError] = useState<string | null>(null);
-  const [generationSubmitting, setGenerationSubmitting] = useState(false);
-  const appliedGenerationRef = useRef<string | null>(null);
+  const [generationCards, setGenerationCards] = useState<GenerationCard[]>([]);
+  const [generationCardsReady, setGenerationCardsReady] = useState(false);
+  const [generationBatchSubmitting, setGenerationBatchSubmitting] = useState(false);
 
   const selectedClip = clips.find((clip) => clip.id === selectedClipId) ?? null;
   const asset = selectedClip?.asset ?? null;
@@ -389,37 +461,12 @@ export function VideoAdEditor() {
     return errors;
   }, [asset, graphics, items, totalClipDuration]);
   const activeJob = job?.status === "queued" || job?.status === "rendering";
-  const activeGeneration = generationSubmitting || generationJob?.status === "generating" || generationJob?.status === "importing";
-  const generationModelConfig = seedanceModelOptions[generationModel];
-  const referenceImageCount = referenceMedia.filter((media) => media.kind === "image").length;
-  const referenceVideoCount = referenceMedia.filter((media) => media.kind === "video").length;
-  const referenceVideoDuration = referenceMedia.reduce(
-    (total, media) => total + (media.kind === "video" ? media.asset.metadata.duration : 0),
-    0,
-  );
-  const generationReferenceError = useMemo(() => {
-    if (generationDuration > generationModelConfig.maxDuration) {
-      return `\uD604\uC7AC \uBAA8\uB378\uC740 \uCD5C\uB300 ${generationModelConfig.maxDuration}\uCD08\uAE4C\uC9C0 \uC0DD\uC131\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.`;
-    }
-    if (referenceImage && referenceMedia.length) {
-      return "\uC2DC\uC791 \uC774\uBBF8\uC9C0\uC640 \uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4\uB294 \uD568\uAED8 \uC0AC\uC6A9\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uD558\uB098\uB9CC \uB0A8\uACA8 \uC8FC\uC138\uC694.";
-    }
-    if (generationModel === "seedance-2-pro" && referenceMedia.length) {
-      return "\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4\uB294 Seedance 2.5 Pro\uC5D0\uC11C\uB9CC \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.";
-    }
-    if (referenceImageCount > 30 || referenceVideoCount > 10) {
-      return "\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4 \uAC1C\uC218\uAC00 \uC81C\uD55C\uC744 \uCD08\uACFC\uD588\uC2B5\uB2C8\uB2E4.";
-    }
-    if (referenceVideoDuration > 30.001) {
-      return "\uB808\uD37C\uB7F0\uC2A4 \uC601\uC0C1\uC758 \uCD1D \uAE38\uC774\uB294 30\uCD08 \uC774\uD558\uC5EC\uC57C \uD569\uB2C8\uB2E4.";
-    }
-    return null;
-  }, [generationDuration, generationModel, generationModelConfig.maxDuration, referenceImage, referenceImageCount, referenceMedia.length, referenceVideoCount, referenceVideoDuration]);
-  useEffect(() => {
-    if (generationDuration > generationModelConfig.maxDuration) {
-      setGenerationDuration(generationModelConfig.maxDuration);
-    }
-  }, [generationDuration, generationModelConfig.maxDuration]);
+  const activeGenerationCount = generationCards.filter(isGenerationCardBusy).length;
+  const completedGenerationCount = generationCards.filter((card) => card.job?.status === "completed").length;
+  const generationPollKey = generationCards
+    .filter(isGenerationCardBusy)
+    .map((card) => `${card.id}:${card.job?.id ?? "submitting"}:${card.job?.status ?? "submitting"}`)
+    .join("|");
 
 
   const timelineSegments = useMemo(() => {
@@ -483,31 +530,137 @@ export function VideoAdEditor() {
 
   const readGeneration = useCallback(async (jobId: string) => {
     const response = await fetch(`/api/video-ad/generations/${jobId}`, { cache: "no-store" });
-    if (response.status === 404) {
-      localStorage.removeItem(LAST_GENERATION_KEY);
-      return null;
-    }
+    if (response.status === 404) return null;
     return responseJson<GenerationView>(response);
   }, []);
 
   useEffect(() => {
-    const lastGeneration = localStorage.getItem(LAST_GENERATION_KEY);
-    if (!lastGeneration) return;
-    void readGeneration(lastGeneration)
-      .then((result) => result && setGenerationJob(result))
-      .catch(() => localStorage.removeItem(LAST_GENERATION_KEY));
+    let cancelled = false;
+    const restore = async () => {
+      const stored = localStorage.getItem(GENERATION_CARDS_KEY);
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored) as unknown;
+          if (Array.isArray(parsed)) {
+            const restored = parsed
+              .filter((card): card is Partial<GenerationCard> & { id: string } => Boolean(card) && typeof card === "object" && typeof (card as { id?: unknown }).id === "string")
+              .slice(0, GENERATION_CARD_LIMIT)
+              .map((card) => {
+                const base = createGenerationCard(card.id, Boolean(card.expanded));
+                return {
+                  ...base,
+                  ...card,
+                  prompt: typeof card.prompt === "string" ? card.prompt : base.prompt,
+                  model: card.model === "seedance-2-pro" || card.model === "seedance-2-5-pro" ? card.model : base.model,
+                  aspectRatio: card.aspectRatio ?? base.aspectRatio,
+                  duration: typeof card.duration === "number" ? card.duration : base.duration,
+                  resolution: card.resolution ?? base.resolution,
+                  soundEffects: typeof card.soundEffects === "boolean" ? card.soundEffects : base.soundEffects,
+                  referenceImage: card.referenceImage ?? null,
+                  referenceMedia: Array.isArray(card.referenceMedia) ? card.referenceMedia : [],
+                  job: card.job ?? null,
+                  error: typeof card.error === "string" ? card.error : null,
+                  referenceImageError: typeof card.referenceImageError === "string" ? card.referenceImageError : null,
+                  referenceMediaError: typeof card.referenceMediaError === "string" ? card.referenceMediaError : null,
+                  isSubmitting: false,
+                  referenceImageUploading: false,
+                  referenceMediaUploading: false,
+                } satisfies GenerationCard;
+              });
+            if (restored.length) {
+              if (!cancelled) setGenerationCards(restored);
+              if (!cancelled) setGenerationCardsReady(true);
+              return;
+            }
+          }
+        } catch {
+          localStorage.removeItem(GENERATION_CARDS_KEY);
+        }
+      }
+
+      const legacyJobId = localStorage.getItem(LAST_GENERATION_KEY);
+      if (legacyJobId) {
+        try {
+          const legacyJob = await readGeneration(legacyJobId);
+          if (legacyJob && !cancelled) {
+            const card = createGenerationCard(crypto.randomUUID(), true);
+            card.prompt = legacyJob.prompt;
+            card.job = legacyJob;
+            setGenerationCards([card]);
+            localStorage.removeItem(LAST_GENERATION_KEY);
+            setGenerationCardsReady(true);
+            return;
+          }
+        } catch {
+          localStorage.removeItem(LAST_GENERATION_KEY);
+        }
+      }
+
+      if (!cancelled) {
+        setGenerationCards([
+          createGenerationCard(crypto.randomUUID(), true),
+          createGenerationCard(crypto.randomUUID()),
+          createGenerationCard(crypto.randomUUID()),
+        ]);
+        setGenerationCardsReady(true);
+      }
+    };
+    void restore();
+    return () => { cancelled = true; };
   }, [readGeneration]);
 
   useEffect(() => {
-    if (!generationJob || !activeGeneration) return;
+    if (!generationCardsReady) return;
+    const persistable = generationCards.map((card) => ({
+      ...card,
+      isSubmitting: false,
+      referenceImageUploading: false,
+      referenceMediaUploading: false,
+    }));
+    localStorage.setItem(GENERATION_CARDS_KEY, JSON.stringify(persistable));
+  }, [generationCards, generationCardsReady]);
+
+  useEffect(() => {
+    if (!generationPollKey) return;
+    const activeJobs = generationCards
+      .filter((card) => card.job && isGenerationCardBusy(card))
+      .map((card) => ({ cardId: card.id, jobId: card.job!.id }));
+    if (!activeJobs.length) return;
     let cancelled = false;
     const poll = async () => {
-      try {
-        const next = await readGeneration(generationJob.id);
-        if (!cancelled && next) setGenerationJob(next);
-      } catch (error) {
-        if (!cancelled) setGenerationError(error instanceof Error ? error.message : "AI \uC0DD\uC131 \uC0C1\uD0DC\uB97C \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.");
-      }
+      await Promise.all(activeJobs.slice(0, 3).map(async ({ cardId, jobId }) => {
+        if (generationPollInFlightRef.current.has(jobId)) return;
+        generationPollInFlightRef.current.add(jobId);
+        try {
+          const next = await readGeneration(jobId);
+          if (cancelled) return;
+          setGenerationCards((current) => current.map((card) => {
+            if (card.id !== cardId || card.job?.id !== jobId) return card;
+            if (!next) {
+              return {
+                ...card,
+                job: {
+                  ...card.job,
+                  status: "failed",
+                  stage: "\uC791\uC5C5\uC744 \uCC3E\uC744 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.",
+                  error: "\uC0DD\uC131 \uC791\uC5C5 \uC815\uBCF4\uB97C \uCC3E\uC744 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uB2E4\uC2DC \uC0DD\uC131\uD574 \uC8FC\uC138\uC694.",
+                },
+                error: "\uC0DD\uC131 \uC791\uC5C5 \uC815\uBCF4\uB97C \uCC3E\uC744 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uB2E4\uC2DC \uC0DD\uC131\uD574 \uC8FC\uC138\uC694.",
+              };
+            }
+            return { ...card, job: next, isSubmitting: false, error: next.error ?? null };
+          }));
+        } catch (error) {
+          if (!cancelled) {
+            const message = error instanceof Error ? error.message : "\uC0DD\uC131 \uC0C1\uD0DC\uB97C \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.";
+            setGenerationCards((current) => current.map((card) => (
+              card.id === cardId && card.job?.id === jobId ? { ...card, error: message } : card
+            )));
+          }
+        } finally {
+          generationPollInFlightRef.current.delete(jobId);
+        }
+      }));
     };
     void poll();
     const timer = window.setInterval(poll, 3000);
@@ -515,37 +668,43 @@ export function VideoAdEditor() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [activeGeneration, generationJob?.id, readGeneration]);
+  }, [generationPollKey, readGeneration]);
 
   useEffect(() => {
-    if (!generationJob?.asset || generationJob.status !== "completed") return;
-    if (appliedGenerationRef.current === generationJob.id) return;
-    appliedGenerationRef.current = generationJob.id;
-    const targetId = generationJob.targetClipId;
-    let nextClipId = targetId;
+    const completedCards = generationCards.filter((card) => (
+      card.job?.status === "completed" && card.job.asset && !appliedGenerationJobIdsRef.current.has(card.job.id)
+    ));
+    if (!completedCards.length) return;
+    completedCards.forEach((card) => appliedGenerationJobIdsRef.current.add(card.job!.id));
+
     setClips((current) => {
-      const target = targetId ? current.find((clip) => clip.id === targetId) : null;
-      if (target) {
-        return current.map((clip) => clip.id === targetId ? {
-          ...clip,
-          asset: generationJob.asset!,
-          fileSize: generationJob.fileSize ?? 0,
-          version: clip.version + 1,
-        } : clip);
-      }
-      nextClipId = crypto.randomUUID();
-      return [...current, {
-        id: nextClipId,
-        asset: generationJob.asset!,
-        fileSize: generationJob.fileSize ?? 0,
-        prompt: generationJob.prompt,
-        version: 1,
-      }];
+      let next = [...current];
+      completedCards.forEach((card) => {
+        const completedJob = card.job!;
+        const matchIndex = next.findIndex((clip) => (
+          clip.generationCardId === card.id || (completedJob.targetClipId !== null && clip.id === completedJob.targetClipId)
+        ));
+        const resolved = {
+          asset: completedJob.asset!,
+          fileSize: completedJob.fileSize ?? 0,
+          prompt: completedJob.prompt,
+          generationCardId: card.id,
+        };
+        if (matchIndex >= 0) {
+          next[matchIndex] = { ...next[matchIndex], ...resolved, version: next[matchIndex].version + 1 };
+        } else {
+          next.push({ id: crypto.randomUUID(), ...resolved, version: 1 });
+        }
+      });
+
+      const cardOrder = new Map(generationCards.map((card, index) => [card.id, index]));
+      const manualClips = next.filter((clip) => !clip.generationCardId);
+      const generatedClips = next
+        .filter((clip) => clip.generationCardId)
+        .sort((left, right) => (cardOrder.get(left.generationCardId!) ?? Number.MAX_SAFE_INTEGER) - (cardOrder.get(right.generationCardId!) ?? Number.MAX_SAFE_INTEGER));
+      return [...manualClips, ...generatedClips];
     });
-    setSelectedClipId(nextClipId);
-    setNewClipPrompt("");
-    localStorage.removeItem(LAST_GENERATION_KEY);
-  }, [generationJob]);
+  }, [generationCards]);
   useEffect(() => {
     const player = playerRef.current;
     if (!player || !clips.length) return;
@@ -837,53 +996,90 @@ export function VideoAdEditor() {
     requestAnimationFrame(() => playerRef.current?.seekTo(startFrame));
   };
 
-  const updateClipPrompt = (clipId: string, prompt: string) => {
-    setClips((current) =>
-      current.map((clip) => clip.id === clipId ? { ...clip, prompt } : clip),
-    );
+  const updateGenerationCard = (cardId: string, update: (card: GenerationCard) => GenerationCard) => {
+    setGenerationCards((current) => current.map((card) => card.id === cardId ? update(card) : card));
   };
 
+  const addGenerationCard = () => {
+    setGenerationCards((current) => {
+      if (current.length >= GENERATION_CARD_LIMIT) return current;
+      return [...current.map((card) => ({ ...card, expanded: false })), createGenerationCard(crypto.randomUUID(), true)];
+    });
+  };
 
-  const startAiGeneration = async (targetClipId: string | null) => {
-    if (activeGeneration) return;
-    const target = targetClipId ? clips.find((clip) => clip.id === targetClipId) : null;
-    const prompt = (target?.prompt ?? newClipPrompt).trim();
+  const removeGenerationCard = (cardId: string) => {
+    setGenerationCards((current) => current.filter((card) => card.id !== cardId));
+    setClips((current) => current.filter((clip) => clip.generationCardId !== cardId));
+  };
+
+  const startGenerationForCard = async (cardId: string) => {
+    const card = generationCards.find((entry) => entry.id === cardId);
+    if (!card || isGenerationCardBusy(card)) return false;
+    const prompt = card.prompt.trim();
     if (!prompt) {
-      setGenerationError("\uC601\uC0C1 \uC124\uBA85\uC744 \uC785\uB825\uD574 \uC8FC\uC138\uC694.");
-      return;
+      updateGenerationCard(cardId, (current) => ({ ...current, error: "\uC601\uC0C1 \uC124\uBA85\uC744 \uC785\uB825\uD574 \uC8FC\uC138\uC694." }));
+      return false;
     }
-    if (generationReferenceError) {
-      setGenerationError(generationReferenceError);
-      return;
+    const referenceError = getGenerationCardReferenceError(card);
+    if (referenceError) {
+      updateGenerationCard(cardId, (current) => ({ ...current, error: referenceError }));
+      return false;
     }
-    setGenerationError(null);
-    appliedGenerationRef.current = null;
-    setGenerationSubmitting(true);
+
+    updateGenerationCard(cardId, (current) => ({ ...current, error: null, isSubmitting: true }));
     try {
       const response = await fetch("/api/video-ad/generations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          targetClipId,
-          model: generationModel,
+          targetClipId: card.id,
+          model: card.model,
           prompt,
-          duration: generationDuration,
-          resolution: generationResolution,
-          aspectRatio: generationAspectRatio,
-          soundEffects: generationSound,
-          imageAssetId: referenceImage?.id ?? null,
-          referenceMedia: referenceMedia.map((media) => ({ kind: media.kind, assetId: media.asset.id })),
+          duration: card.duration,
+          resolution: card.resolution,
+          aspectRatio: card.aspectRatio,
+          soundEffects: card.soundEffects,
+          imageAssetId: card.referenceImage?.id ?? null,
+          referenceMedia: card.referenceMedia.map((media) => ({ kind: media.kind, assetId: media.asset.id })),
         }),
       });
       const created = await responseJson<GenerationView>(response);
-      setGenerationJob(created);
-      localStorage.setItem(LAST_GENERATION_KEY, created.id);
+      updateGenerationCard(cardId, (current) => ({
+        ...current,
+        job: created,
+        isSubmitting: false,
+        error: null,
+        expanded: true,
+      }));
+      return true;
     } catch (error) {
-      setGenerationError(error instanceof Error ? error.message : "AI \uC601\uC0C1 \uC0DD\uC131\uC744 \uC2DC\uC791\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.");
-    } finally {
-      setGenerationSubmitting(false);
+      const message = error instanceof Error ? error.message : "AI \uC601\uC0C1 \uC0DD\uC131\uC744 \uC2DC\uC791\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.";
+      updateGenerationCard(cardId, (current) => ({ ...current, isSubmitting: false, error: message }));
+      return false;
     }
   };
+
+  const startAllGeneration = async () => {
+    const cardIds = generationCards
+      .filter((card) => !isGenerationCardBusy(card) && card.job?.status !== "completed" && Boolean(card.prompt.trim()))
+      .map((card) => card.id);
+    if (!cardIds.length) return;
+    setGenerationBatchSubmitting(true);
+    try {
+      let cursor = 0;
+      const requestWorker = async () => {
+        while (cursor < cardIds.length) {
+          const cardId = cardIds[cursor];
+          cursor += 1;
+          await startGenerationForCard(cardId);
+        }
+      };
+      await Promise.all([requestWorker(), requestWorker()]);
+    } finally {
+      setGenerationBatchSubmitting(false);
+    }
+  };
+
   const startSequencePlayback = () => {
     if (!clips.length) return;
     setSelectedClipId(clips[0].id);
@@ -943,60 +1139,61 @@ export function VideoAdEditor() {
       if (graphicInputRef.current) graphicInputRef.current.value = "";
     }
   };
-  const uploadReferenceImage = async (file: File) => {
-    setReferenceImageError(null);
-    if (referenceMedia.length) {
-      setReferenceImageError("\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4\uB97C \uBAA8\uB450 \uC81C\uAC70\uD55C \uD6C4 \uC2DC\uC791 \uC774\uBBF8\uC9C0\uB97C \uCD94\uAC00\uD574 \uC8FC\uC138\uC694.");
+  const uploadGenerationReferenceImage = async (cardId: string, file: File) => {
+    const card = generationCards.find((entry) => entry.id === cardId);
+    if (!card) return;
+    if (card.referenceMedia.length) {
+      updateGenerationCard(cardId, (current) => ({ ...current, referenceImageError: "\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4\uB97C \uBAA8\uB450 \uC81C\uAC70\uD55C \uD6C4 \uC2DC\uC791 \uC774\uBBF8\uC9C0\uB97C \uCD94\uAC00\uD574 \uC8FC\uC138\uC694." }));
       return;
     }
     if (!CLOUD_UPLOADS_ENABLED) {
-      setReferenceImageError("\uC2DC\uC791 \uC774\uBBF8\uC9C0 \uAE30\uB2A5\uC740 Supabase \uC800\uC7A5\uC18C\uAC00 \uC5F0\uACB0\uB41C \uBC30\uD3EC \uD658\uACBD\uC5D0\uC11C \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.");
+      updateGenerationCard(cardId, (current) => ({ ...current, referenceImageError: "\uC2DC\uC791 \uC774\uBBF8\uC9C0 \uAE30\uB2A5\uC740 Supabase \uC800\uC7A5\uC18C\uAC00 \uC5F0\uACB0\uB41C \uBC30\uD3EC \uD658\uACBD\uC5D0\uC11C \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4." }));
       return;
     }
     if (!file.name.toLowerCase().endsWith(".png")) {
-      setReferenceImageError("PNG \uD30C\uC77C\uB9CC \uC2DC\uC791 \uC774\uBBF8\uC9C0\uB85C \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.");
+      updateGenerationCard(cardId, (current) => ({ ...current, referenceImageError: "PNG \uD30C\uC77C\uB9CC \uC2DC\uC791 \uC774\uBBF8\uC9C0\uB85C \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4." }));
       return;
     }
     if (file.size > MAX_GRAPHIC_BYTES) {
-      setReferenceImageError("\uC2DC\uC791 PNG\uB294 \uCD5C\uB300 10MB\uAE4C\uC9C0 \uC5C5\uB85C\uB4DC\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.");
+      updateGenerationCard(cardId, (current) => ({ ...current, referenceImageError: "\uC2DC\uC791 PNG\uB294 \uCD5C\uB300 10MB\uAE4C\uC9C0 \uC5C5\uB85C\uB4DC\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4." }));
       return;
     }
-    setReferenceImageUploading(true);
+
+    updateGenerationCard(cardId, (current) => ({ ...current, referenceImageError: null, referenceImageUploading: true }));
     try {
       const result = await uploadToCloud<{ asset: GraphicAsset }>("graphic", file);
-      setReferenceImage(result.asset);
+      updateGenerationCard(cardId, (current) => ({ ...current, referenceImage: result.asset, referenceImageUploading: false }));
     } catch (error) {
-      setReferenceImageError(
-        error instanceof Error ? error.message : "\uC2DC\uC791 \uC774\uBBF8\uC9C0 \uC5C5\uB85C\uB4DC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4.",
-      );
+      const message = error instanceof Error ? error.message : "\uC2DC\uC791 \uC774\uBBF8\uC9C0 \uC5C5\uB85C\uB4DC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4.";
+      updateGenerationCard(cardId, (current) => ({ ...current, referenceImageUploading: false, referenceImageError: message }));
     } finally {
-      setReferenceImageUploading(false);
       if (referenceImageInputRef.current) referenceImageInputRef.current.value = "";
     }
   };
 
-  const uploadReferenceMedia = async (files: File[]) => {
-    if (!files.length) return;
-    setReferenceMediaError(null);
+  const uploadGenerationReferenceMedia = async (cardId: string, files: File[]) => {
+    const card = generationCards.find((entry) => entry.id === cardId);
+    if (!card || !files.length) return;
     if (!CLOUD_UPLOADS_ENABLED) {
-      setReferenceMediaError("\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4\uB294 Supabase \uC800\uC7A5\uC18C\uAC00 \uC5F0\uACB0\uB41C \uBC30\uD3EC \uD658\uACBD\uC5D0\uC11C \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.");
+      updateGenerationCard(cardId, (current) => ({ ...current, referenceMediaError: "\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4\uB294 Supabase \uC800\uC7A5\uC18C\uAC00 \uC5F0\uACB0\uB41C \uBC30\uD3EC \uD658\uACBD\uC5D0\uC11C \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4." }));
       return;
     }
-    if (generationModel !== "seedance-2-5-pro") {
-      setReferenceMediaError("\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4\uB294 Seedance 2.5 Pro\uC5D0\uC11C\uB9CC \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.");
+    if (card.model !== "seedance-2-5-pro") {
+      updateGenerationCard(cardId, (current) => ({ ...current, referenceMediaError: "\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4\uB294 Seedance 2.5 Pro\uC5D0\uC11C\uB9CC \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4." }));
       return;
     }
-    if (referenceImage) {
-      setReferenceMediaError("\uC2DC\uC791 \uC774\uBBF8\uC9C0\uB97C \uC81C\uAC70\uD55C \uD6C4 \uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4\uB97C \uCD94\uAC00\uD574 \uC8FC\uC138\uC694.");
+    if (card.referenceImage) {
+      updateGenerationCard(cardId, (current) => ({ ...current, referenceMediaError: "\uC2DC\uC791 \uC774\uBBF8\uC9C0\uB97C \uC81C\uAC70\uD55C \uD6C4 \uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4\uB97C \uCD94\uAC00\uD574 \uC8FC\uC138\uC694." }));
       return;
     }
 
-    setReferenceMediaUploading(true);
+    updateGenerationCard(cardId, (current) => ({ ...current, referenceMediaError: null, referenceMediaUploading: true }));
     const added: ReferenceMedia[] = [];
     const messages: string[] = [];
-    let imageCount = referenceImageCount;
-    let videoCount = referenceVideoCount;
-    let videoDuration = referenceVideoDuration;
+    let imageCount = card.referenceMedia.filter((media) => media.kind === "image").length;
+    let videoCount = card.referenceMedia.filter((media) => media.kind === "video").length;
+    let videoDuration = card.referenceMedia.reduce((total, media) => total + (media.kind === "video" ? media.asset.metadata.duration : 0), 0);
+
     try {
       for (const file of files) {
         const name = file.name.toLowerCase();
@@ -1042,12 +1239,15 @@ export function VideoAdEditor() {
       }
     } catch (error) {
       messages.push(error instanceof Error ? error.message : "\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4 \uC5C5\uB85C\uB4DC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4.");
-    } finally {
-      setReferenceMediaUploading(false);
-      if (referenceMediaInputRef.current) referenceMediaInputRef.current.value = "";
     }
-    if (added.length) setReferenceMedia((current) => [...current, ...added]);
-    if (messages.length) setReferenceMediaError(messages.join("\n"));
+
+    updateGenerationCard(cardId, (current) => ({
+      ...current,
+      referenceMediaUploading: false,
+      referenceMedia: added.length ? [...current.referenceMedia, ...added] : current.referenceMedia,
+      referenceMediaError: messages.length ? messages.join("\n") : null,
+    }));
+    if (referenceMediaInputRef.current) referenceMediaInputRef.current.value = "";
   };
 
 
@@ -1280,65 +1480,34 @@ export function VideoAdEditor() {
             hidden={activeEditorMode !== "generate"}
             className={`${styles.card} ${styles.generationCard}`}
           >
-            <div className={styles.aiGenerator}>
-              <div className={styles.aiGeneratorHeader}>
-                <span><Sparkles size={14} /> {generationModelConfig.label}</span>
-                <em>API 크레딧 사용</em>
-              </div>
-              <div className={styles.modelSelector} role="group" aria-label={"\uC0DD\uC131 \uBAA8\uB378 \uC120\uD0DD"}>
-                {(["seedance-2-pro", "seedance-2-5-pro"] as SeedanceModel[]).map((model) => {
-                  const option = seedanceModelOptions[model];
-                  const selected = generationModel === model;
-                  return (
-                    <button
-                      type="button"
-                      key={model}
-                      className={`${styles.modelOption} ${selected ? styles.modelOptionActive : ""}`}
-                      onClick={() => {
-                        setGenerationModel(model);
-                        setGenerationDuration((current) => Math.max(4, Math.min(option.maxDuration, current)));
-                        setGenerationError(null);
-                      }}
-                      disabled={activeGeneration || referenceImageUploading || referenceMediaUploading}
-                      aria-pressed={selected}
-                    >
-                      <span>{option.label}</span>
-                      <small>{option.supportsReferenceMedia
-                        ? "\uB808\uD37C\uB7F0\uC2A4 \uC774\uBBF8\uC9C0\u00B7\uC601\uC0C1 \uC0AC\uC6A9"
-                        : "\uD14D\uC2A4\uD2B8\u00B7\uC2DC\uC791 \uC774\uBBF8\uC9C0 \uC0AC\uC6A9"}</small>
-                    </button>
-                  );
-                })}
+            <div className={[styles.aiGenerator, styles.generationQueuePanel].filter(Boolean).join(" ")}>
+              <div className={styles.generationQueueHeader}>
+                <div>
+                  <span><Sparkles size={14} /> {"\uC601\uC0C1 \uB9CC\uB4E4\uAE30"}</span>
+                  <p>{"\uCEE7\uBCC4\uB85C \uD504\uB86C\uD504\uD2B8\uC640 \uB808\uD37C\uB7F0\uC2A4\uB97C \uC785\uB825\uD558\uACE0, \uAC01\uAC01 \uB3C5\uB9BD\uC801\uC73C\uB85C \uC0DD\uC131\uD569\uB2C8\uB2E4."}</p>
+                </div>
+                <div className={styles.generationQueueHeaderActions}>
+                  <span className={styles.generationQueueCount}>{generationCards.length}{"\uAC1C \uCEF7"}</span>
+                  <button
+                    type="button"
+                    className={styles.generationAddButton}
+                    onClick={addGenerationCard}
+                    disabled={!generationCardsReady || generationCards.length >= GENERATION_CARD_LIMIT}
+                  ><Plus size={13} /> {"\uCEF7 \uCD94\uAC00"}</button>
+                </div>
               </div>
 
-              <fieldset className={styles.generationRatioSelector}>
-                <legend>{"\uC0DD\uC131 \uD654\uBA74 \uBE44\uC728"}</legend>
-                <div className={styles.generationRatioGrid} role="group" aria-label={"\uC2DC\uB304\uC2A4 \uC0DD\uC131 \uD654\uBA74 \uBE44\uC728"}>
-                  {seedanceAspectRatioOptions.map((option) => {
-                    const selected = generationAspectRatio === option.value;
-                    return (
-                      <button
-                        type="button"
-                        key={option.value}
-                        className={[
-                          styles.generationRatioOption,
-                          selected ? styles.generationRatioOptionActive : "",
-                        ].filter(Boolean).join(" ")}
-                        onClick={() => {
-                          setGenerationAspectRatio(option.value);
-                          setGenerationError(null);
-                        }}
-                        disabled={activeGeneration || Boolean(referenceImage)}
-                        aria-pressed={selected}
-                      >
-                        <span className={styles.generationRatioIcon} style={{ aspectRatio: option.visualRatio }} />
-                        <strong>{option.label}</strong>
-                      </button>
-                    );
-                  })}
-                </div>
-                {referenceImage && <small className={styles.generationRatioNotice}>{"\uC2DC\uC791 \uC774\uBBF8\uC9C0\uB97C \uC4F0\uBA74 \uC774\uBBF8\uC9C0 \uC6D0\uBCF8 \uBE44\uC728\uC774 \uC801\uC6A9\uB429\uB2C8\uB2E4."}</small>}
-              </fieldset>
+              <div className={styles.generationQueueSummary}>
+                <span>{activeGenerationCount > 0 ? <><LoaderCircle className={styles.spin} size={12} /> {activeGenerationCount}{"\uAC1C \uC0DD\uC131 \uC911"}</> : <><CheckCircle2 size={12} /> {completedGenerationCount}{"\uAC1C \uC644\uB8CC"}</>}</span>
+                <button
+                  type="button"
+                  onClick={() => void startAllGeneration()}
+                  disabled={generationBatchSubmitting || !generationCards.some((card) => !isGenerationCardBusy(card) && card.job?.status !== "completed" && Boolean(card.prompt.trim()))}
+                >
+                  {generationBatchSubmitting ? <LoaderCircle className={styles.spin} size={12} /> : <Sparkles size={12} />}
+                  {generationBatchSubmitting ? "\uC694\uCCAD \uC911" : "\uC791\uC131\uB41C \uCEF7 \uBAA8\uB450 \uC0DD\uC131"}
+                </button>
+              </div>
 
               <input
                 ref={referenceImageInputRef}
@@ -1346,8 +1515,11 @@ export function VideoAdEditor() {
                 type="file"
                 accept="image/png,.png"
                 onChange={(event) => {
+                  const target = generationUploadTargetRef.current;
                   const file = event.target.files?.[0];
-                  if (file) void uploadReferenceImage(file);
+                  generationUploadTargetRef.current = null;
+                  if (target?.kind === "image" && file) void uploadGenerationReferenceImage(target.cardId, file);
+                  event.currentTarget.value = "";
                 }}
               />
               <input
@@ -1357,158 +1529,222 @@ export function VideoAdEditor() {
                 accept="image/png,.png,video/mp4,.mp4"
                 multiple
                 onChange={(event) => {
+                  const target = generationUploadTargetRef.current;
                   const files = Array.from(event.target.files ?? []);
-                  if (files.length) void uploadReferenceMedia(files);
+                  generationUploadTargetRef.current = null;
+                  if (target?.kind === "media" && files.length) void uploadGenerationReferenceMedia(target.cardId, files);
+                  event.currentTarget.value = "";
                 }}
               />
 
-              <div className={styles.referenceImage}>
-                <div className={styles.referenceImageMeta}>
-                  {referenceImage ? (
-                    <img
-                      className={styles.referenceImageThumbnail}
-                      src={referenceImage.sourceUrl}
-                      alt={"\uC2DC\uC791 \uC774\uBBF8\uC9C0 \uBBF8\uB9AC\uBCF4\uAE30"}
-                    />
-                  ) : (
-                    <span className={styles.referenceImagePlaceholder}><ImageIcon size={16} /></span>
-                  )}
-                  <div>
-                    <strong>{"\uC2DC\uC791 \uC774\uBBF8\uC9C0"}</strong>
-                    <span>
-                      {referenceImage
-                        ? `${referenceImage.originalName} \u00B7 ${referenceImage.width} \u00D7 ${referenceImage.height}`
-                        : "\uC5C6\uC73C\uBA74 \uD14D\uC2A4\uD2B8\u2192\uC601\uC0C1\uC73C\uB85C \uC0DD\uC131\uD569\uB2C8\uB2E4."}
-                    </span>
-                  </div>
-                </div>
-                {referenceImage ? (
-                  <button
-                    type="button"
-                    className={styles.referenceImageButton}
-                    onClick={() => { setReferenceImage(null); setReferenceImageError(null); }}
-                    disabled={activeGeneration}
-                  >
-                    <Trash2 size={12} /> {"\uC81C\uAC70"}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className={styles.referenceImageButton}
-                    onClick={() => referenceImageInputRef.current?.click()}
-                    disabled={activeGeneration || referenceImageUploading || referenceMediaUploading || !CLOUD_UPLOADS_ENABLED || referenceMedia.length > 0}
-                  >
-                    {referenceImageUploading ? <LoaderCircle className={styles.spin} size={12} /> : <ImageIcon size={12} />}
-                    {referenceImageUploading ? "\uC5C5\uB85C\uB4DC \uC911" : "\uC2DC\uC791 \uC774\uBBF8\uC9C0 \uCD94\uAC00"}
-                  </button>
-                )}
-              </div>
-              {referenceImageError && <p className={styles.referenceImageError} role="alert">{referenceImageError}</p>}
-              {referenceImage && (
-                <small className={styles.referenceImageHint}>
-                  {"\uC774\uBBF8\uC9C0\uAC00 \uC788\uC73C\uBA74 \uC774\uBBF8\uC9C0\u2192\uC601\uC0C1\uC73C\uB85C \uC0DD\uC131\uB418\uBA70, \uACB0\uACFC \uBE44\uC728\uC740 \uC2DC\uC791 \uC774\uBBF8\uC9C0 \uBE44\uC728\uC744 \uB530\uB985\uB2C8\uB2E4."}
-                </small>
-              )}
-              <section className={styles.referenceMedia}>
-                <div className={styles.referenceMediaHeader}>
-                  <div>
-                    <strong>{"\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4"}</strong>
-                    <span>{`PNG ${referenceImageCount}\uAC1C \u00B7 MP4 ${referenceVideoCount}\uAC1C`}</span>
-                  </div>
-                  <button
-                    type="button"
-                    className={styles.referenceImageButton}
-                    onClick={() => referenceMediaInputRef.current?.click()}
-                    disabled={activeGeneration || referenceImageUploading || referenceMediaUploading || !CLOUD_UPLOADS_ENABLED || !generationModelConfig.supportsReferenceMedia || Boolean(referenceImage)}
-                  >
-                    {referenceMediaUploading ? <LoaderCircle className={styles.spin} size={12} /> : <UploadCloud size={12} />}
-                    {referenceMediaUploading ? "\uC5C5\uB85C\uB4DC \uC911" : "\uBBF8\uB514\uC5B4 \uCD94\uAC00"}
-                  </button>
-                </div>
-                {!generationModelConfig.supportsReferenceMedia && (
-                  <p className={styles.referenceMediaNotice}>{"\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4\uB294 Seedance 2.5 Pro\uC5D0\uC11C\uB9CC \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4."}</p>
-                )}
-                {referenceImage && (
-                  <p className={styles.referenceMediaNotice}>{"\uC2DC\uC791 \uC774\uBBF8\uC9C0 \uBAA8\uB4DC\uC640 \uB808\uD37C\uB7F0\uC2A4 \uBAA8\uB4DC\uB294 \uD568\uAED8 \uC0AC\uC6A9\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4."}</p>
-                )}
-                {referenceMedia.length ? (
-                  <div className={styles.referenceMediaList}>
-                    {referenceMedia.map((media, index) => {
-                      const ordinal = referenceMedia.slice(0, index + 1).filter((entry) => entry.kind === media.kind).length;
-                      const label = media.kind === "image" ? `@Image${ordinal}` : `@Video${ordinal}`;
-                      return (
-                        <article className={styles.referenceMediaItem} key={media.id}>
-                          {media.kind === "image" ? (
-                            <img className={styles.referenceMediaPreview} src={media.asset.sourceUrl} alt={label} />
-                          ) : (
-                            <video className={styles.referenceMediaPreview} src={media.asset.sourceUrl} muted playsInline preload="metadata" />
-                          )}
-                          <div>
-                            <strong>{label}</strong>
-                            <span title={media.asset.originalName}>{media.asset.originalName}</span>
-                            <small>{media.kind === "image"
-                              ? `${media.asset.width} \u00D7 ${media.asset.height}`
-                              : `${media.asset.metadata.duration.toFixed(2)}\uCD08 \u00B7 ${media.asset.metadata.width} \u00D7 ${media.asset.metadata.height}`}</small>
-                          </div>
+              {!generationCardsReady ? (
+                <div className={styles.generationQueueEmpty}><LoaderCircle className={styles.spin} size={14} /> {"\uCEF7 \uC791\uC5C5 \uD654\uBA74\uC744 \uC900\uBE44\uD558\uACE0 \uC788\uC2B5\uB2C8\uB2E4."}</div>
+              ) : (
+                <div className={styles.generationQueue}>
+                  {generationCards.map((card, index) => {
+                    const modelConfig = seedanceModelOptions[card.model];
+                    const busy = isGenerationCardBusy(card);
+                    const referenceError = getGenerationCardReferenceError(card);
+                    const referenceImageCount = card.referenceMedia.filter((media) => media.kind === "image").length;
+                    const referenceVideoCount = card.referenceMedia.filter((media) => media.kind === "video").length;
+                    const statusClass = card.isSubmitting ? styles.generating : card.job ? styles[card.job.status] : "";
+                    const error = card.error || card.job?.error;
+                    const cardClip = clips.find((clip) => clip.generationCardId === card.id);
+                    return (
+                      <article
+                        className={[styles.generationDraftCard, card.expanded ? styles.generationDraftCardOpen : "", busy ? styles.generationDraftCardActive : ""].filter(Boolean).join(" ")}
+                        key={card.id}
+                      >
+                        <header className={styles.generationDraftHeader}>
                           <button
                             type="button"
-                            className={styles.referenceMediaRemove}
-                            aria-label={`${label} \uC81C\uAC70`}
-                            onClick={() => setReferenceMedia((current) => current.filter((entry) => entry.id !== media.id))}
-                            disabled={activeGeneration}
-                          ><Trash2 size={12} /></button>
-                        </article>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className={styles.referenceMediaEmpty}>{"PNG \uB610\uB294 MP4\uB97C \uCD94\uAC00\uD558\uBA74 \uC0DD\uC131 \uACB0\uACFC\uC5D0 \uC2A4\uD0C0\uC77C\uACFC \uB3D9\uC791\uC744 \uCC38\uC870\uD569\uB2C8\uB2E4."}</p>
-                )}
-                <small className={styles.referenceMediaHint}>{"\uD504\uB86C\uD504\uD2B8\uC5D0 @Image1, @Video1\uCC98\uB7FC \uC21C\uC11C\uBCC4 \uC774\uB984\uC744 \uC4F0\uBA74 \uD574\uB2F9 \uB808\uD37C\uB7F0\uC2A4\uB97C \uC9C0\uC815\uD574 \uC124\uBA85\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4."}</small>
-              </section>
-              {referenceMediaError && <p className={styles.referenceImageError} role="alert">{referenceMediaError}</p>}
-              {generationReferenceError && <p className={styles.referenceImageError} role="alert">{generationReferenceError}</p>}
+                            className={styles.generationDraftToggle}
+                            onClick={() => updateGenerationCard(card.id, (current) => ({ ...current, expanded: !current.expanded }))}
+                            aria-expanded={card.expanded}
+                          >
+                            <span className={styles.generationDraftIdentity}>
+                              <strong>{"\uCEF7 "}{index + 1}</strong>
+                              <small className={[styles.generationDraftBadge, statusClass].filter(Boolean).join(" ")}>{generationStatusLabel(card)}</small>
+                            </span>
+                            <span className={styles.generationDraftMeta}>{card.duration}{"\uCD08 \u00B7 "}{seedanceAspectRatioOptions.find((option) => option.value === card.aspectRatio)?.label ?? "9:16"}<ChevronDown className={card.expanded ? styles.generationChevronOpen : ""} size={14} /></span>
+                          </button>
+                          <div className={styles.generationDraftActions}>
+                            {cardClip && (
+                              <button type="button" title="\uD0C0\uC784\uB77C\uC778\uC5D0\uC11C \uBCF4\uAE30" onClick={() => selectClip(cardClip.id)}><MonitorPlay size={13} /></button>
+                            )}
+                            <button
+                              type="button"
+                              title={busy ? "\uC0DD\uC131 \uC911\uC5D0\uB294 \uC0AD\uC81C\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4." : "\uCEF7 \uC0AD\uC81C"}
+                              aria-label="\uCEF7 \uC0AD\uC81C"
+                              onClick={() => removeGenerationCard(card.id)}
+                              disabled={busy}
+                            ><Trash2 size={13} /></button>
+                          </div>
+                        </header>
 
-              {selectedClip && (
-                <label className={styles.clipPrompt}>
-                  <span>선택 컷 재생성 프롬프트</span>
-                  <textarea
-                    rows={3}
-                    value={selectedClip.prompt}
-                    placeholder="예: 판타지 게임 캐릭터가 보스를 향해 달려가는 역동적인 장면"
-                    onChange={(event) => updateClipPrompt(selectedClip.id, event.target.value)}
-                    disabled={activeGeneration}
-                  />
-                </label>
-              )}
-              <label className={styles.clipPrompt}>
-                <span>새 AI 컷 프롬프트</span>
-                <textarea
-                  rows={3}
-                  value={newClipPrompt}
-                  placeholder="새로운 장면을 설명하면 현재 타임라인 끝에 추가됩니다"
-                  onChange={(event) => setNewClipPrompt(event.target.value)}
-                  disabled={activeGeneration}
-                />
-              </label>
-              <div className={styles.aiOptions}>
-                <label><span>길이</span><input type="number" min={4} max={30} step={1} value={generationDuration} disabled={activeGeneration} onChange={(event) => setGenerationDuration(Math.max(4, Math.min(30, Math.round(Number(event.target.value) || 4))))} /></label>
-                <label><span>화질</span><select value={generationResolution} disabled={activeGeneration} onChange={(event) => setGenerationResolution(event.target.value as "480p" | "720p" | "1080p")}><option value="480p">480p</option><option value="720p">720p</option><option value="1080p">1080p</option></select></label>
-                <label className={styles.aiSound}><input type="checkbox" checked={generationSound} disabled={activeGeneration} onChange={(event) => setGenerationSound(event.target.checked)} /><span>효과음 생성</span></label>
-              </div>
-              <small className={styles.referenceMediaHint}>{`\uD604\uC7AC \uBAA8\uB378 \uC0DD\uC131 \uAE38\uC774: 4~${generationModelConfig.maxDuration}\uCD08`}</small>
-              <div className={styles.aiActions}>
-                {selectedClip && <button type="button" disabled={activeGeneration || !selectedClip.prompt.trim()} onClick={() => void startAiGeneration(selectedClip.id)}><RefreshCw size={13} /> 선택 컷 다시 생성</button>}
-                <button type="button" disabled={activeGeneration || !newClipPrompt.trim()} onClick={() => void startAiGeneration(null)}><Sparkles size={13} /> 새 AI 컷 추가</button>
-              </div>
-              {generationJob && (
-                <div className={`${styles.generationStatus} ${styles[generationJob.status]}`}>
-                  {activeGeneration ? <LoaderCircle className={styles.spin} size={14} /> : generationJob.status === "completed" ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
-                  <span>{generationJob.stage}</span>
+                        {card.expanded && (
+                          <div className={styles.generationDraftBody}>
+                            <label className={[styles.clipPrompt, styles.generationDraftPrompt].join(" ")}>
+                              <span>{"\uC774 \uCEF7\uC758 \uC601\uC0C1 \uC124\uBA85"}</span>
+                              <textarea
+                                rows={5}
+                                value={card.prompt}
+                                placeholder="\uC608: \uC5B4\uB450\uC6B4 \uB358\uC804\uC5D0\uC11C \uAC8C\uC784 \uCE90\uB9AD\uD130\uAC00 \uBCF4\uC2A4\uC640 \uACA9\uB82C\uD558\uB294 \uC5ED\uB3D9\uC801\uC778 \uC804\uD22C \uC7A5\uBA74"
+                                onChange={(event) => updateGenerationCard(card.id, (current) => ({ ...current, prompt: event.target.value, error: null }))}
+                                disabled={busy}
+                              />
+                              <small>{"\uAC01 \uCEF7\uC758 \uACB0\uACFC\uB294 \uC544\uB798\uC758 \uCEF7 \uBC88\uD638 \uC21C\uC11C\uB300\uB85C \uD0C0\uC784\uB77C\uC778\uC5D0 \uC5F0\uACB0\uB429\uB2C8\uB2E4."}</small>
+                            </label>
+
+                            <div className={styles.modelSelector} role="group" aria-label="\uC0DD\uC131 \uBAA8\uB378 \uC120\uD0DD">
+                              {(["seedance-2-pro", "seedance-2-5-pro"] as SeedanceModel[]).map((model) => {
+                                const option = seedanceModelOptions[model];
+                                const selected = card.model === model;
+                                return (
+                                  <button
+                                    type="button"
+                                    key={model}
+                                    className={[styles.modelOption, selected ? styles.modelOptionActive : ""].filter(Boolean).join(" ")}
+                                    onClick={() => updateGenerationCard(card.id, (current) => ({
+                                      ...current,
+                                      model,
+                                      duration: Math.max(4, Math.min(option.maxDuration, current.duration)),
+                                      error: null,
+                                    }))}
+                                    disabled={busy || card.referenceImageUploading || card.referenceMediaUploading}
+                                    aria-pressed={selected}
+                                  >
+                                    <span>{option.label}</span>
+                                    <small>{option.supportsReferenceMedia ? "\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4 \uC0AC\uC6A9" : "\uC2DC\uC791 \uC774\uBBF8\uC9C0 \uC0AC\uC6A9"}</small>
+                                  </button>
+                                );
+                              })}
+                            </div>
+
+                            <fieldset className={styles.generationRatioSelector}>
+                              <legend>{"\uC0DD\uC131 \uD654\uBA74 \uBE44\uC728"}</legend>
+                              <div className={styles.generationRatioGrid} role="group" aria-label="\uC0DD\uC131 \uD654\uBA74 \uBE44\uC728">
+                                {seedanceAspectRatioOptions.map((option) => {
+                                  const selected = card.aspectRatio === option.value;
+                                  return (
+                                    <button
+                                      type="button"
+                                      key={option.value}
+                                      className={[styles.generationRatioOption, selected ? styles.generationRatioOptionActive : ""].filter(Boolean).join(" ")}
+                                      onClick={() => updateGenerationCard(card.id, (current) => ({ ...current, aspectRatio: option.value, error: null }))}
+                                      disabled={busy || Boolean(card.referenceImage)}
+                                      aria-pressed={selected}
+                                    >
+                                      <span className={styles.generationRatioIcon} style={{ aspectRatio: option.visualRatio }} />
+                                      <strong>{option.label}</strong>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              {card.referenceImage && <small className={styles.generationRatioNotice}>{"\uC2DC\uC791 \uC774\uBBF8\uC9C0\uB97C \uC4F0\uBA74 \uC774\uBBF8\uC9C0 \uC6D0\uBCF8 \uBE44\uC728\uC774 \uC801\uC6A9\uB429\uB2C8\uB2E4."}</small>}
+                            </fieldset>
+
+                            <div className={styles.referenceImage}>
+                              <div className={styles.referenceImageMeta}>
+                                {card.referenceImage ? (
+                                  <img className={styles.referenceImageThumbnail} src={card.referenceImage.sourceUrl} alt="\uC2DC\uC791 \uC774\uBBF8\uC9C0 \uBBF8\uB9AC\uBCF4\uAE30" />
+                                ) : (
+                                  <span className={styles.referenceImagePlaceholder}><ImageIcon size={16} /></span>
+                                )}
+                                <div>
+                                  <strong>{"\uC2DC\uC791 \uC774\uBBF8\uC9C0"}</strong>
+                                  <span>{card.referenceImage ? card.referenceImage.originalName + " \u00B7 " + card.referenceImage.width + " \u00D7 " + card.referenceImage.height : "\uC5C6\uC73C\uBA74 \uD14D\uC2A4\uD2B8\u2192\uC601\uC0C1\uC73C\uB85C \uC0DD\uC131\uD569\uB2C8\uB2E4."}</span>
+                                </div>
+                              </div>
+                              {card.referenceImage ? (
+                                <button type="button" className={styles.referenceImageButton} onClick={() => updateGenerationCard(card.id, (current) => ({ ...current, referenceImage: null, referenceImageError: null }))} disabled={busy}><Trash2 size={12} /> {"\uC81C\uAC70"}</button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className={styles.referenceImageButton}
+                                  onClick={() => { generationUploadTargetRef.current = { cardId: card.id, kind: "image" }; referenceImageInputRef.current?.click(); }}
+                                  disabled={busy || card.referenceImageUploading || card.referenceMediaUploading || !CLOUD_UPLOADS_ENABLED || card.referenceMedia.length > 0}
+                                >
+                                  {card.referenceImageUploading ? <LoaderCircle className={styles.spin} size={12} /> : <ImageIcon size={12} />}
+                                  {card.referenceImageUploading ? "\uC5C5\uB85C\uB4DC \uC911" : "\uC2DC\uC791 \uC774\uBBF8\uC9C0 \uCD94\uAC00"}
+                                </button>
+                              )}
+                            </div>
+                            {card.referenceImageError && <p className={styles.referenceImageError} role="alert">{card.referenceImageError}</p>}
+                            {card.referenceImage && <small className={styles.referenceImageHint}>{"\uC2DC\uC791 \uC774\uBBF8\uC9C0\uAC00 \uC788\uC73C\uBA74 \uC774\uBBF8\uC9C0\u2192\uC601\uC0C1 \uC0DD\uC131\uC73C\uB85C \uC9C4\uD589\uB418\uBA70, \uACB0\uACFC \uBE44\uC728\uC740 \uC6D0\uBCF8 \uC774\uBBF8\uC9C0\uB97C \uB530\uB985\uB2C8\uB2E4."}</small>}
+
+                            <section className={styles.referenceMedia}>
+                              <div className={styles.referenceMediaHeader}>
+                                <div><strong>{"\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4"}</strong><span>{"PNG "}{referenceImageCount}{"\uAC1C \u00B7 MP4 "}{referenceVideoCount}{"\uAC1C"}</span></div>
+                                <button
+                                  type="button"
+                                  className={styles.referenceImageButton}
+                                  onClick={() => { generationUploadTargetRef.current = { cardId: card.id, kind: "media" }; referenceMediaInputRef.current?.click(); }}
+                                  disabled={busy || card.referenceImageUploading || card.referenceMediaUploading || !CLOUD_UPLOADS_ENABLED || !modelConfig.supportsReferenceMedia || Boolean(card.referenceImage)}
+                                >
+                                  {card.referenceMediaUploading ? <LoaderCircle className={styles.spin} size={12} /> : <UploadCloud size={12} />}
+                                  {card.referenceMediaUploading ? "\uC5C5\uB85C\uB4DC \uC911" : "\uBBF8\uB514\uC5B4 \uCD94\uAC00"}
+                                </button>
+                              </div>
+                              {!modelConfig.supportsReferenceMedia && <p className={styles.referenceMediaNotice}>{"\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4\uB294 Seedance 2.5 Pro\uC5D0\uC11C\uB9CC \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4."}</p>}
+                              {card.referenceImage && <p className={styles.referenceMediaNotice}>{"\uC2DC\uC791 \uC774\uBBF8\uC9C0 \uBAA8\uB4DC\uC640 \uB808\uD37C\uB7F0\uC2A4 \uBAA8\uB4DC\uB294 \uD568\uAED8 \uC0AC\uC6A9\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4."}</p>}
+                              {card.referenceMedia.length ? (
+                                <div className={styles.referenceMediaList}>
+                                  {card.referenceMedia.map((media, mediaIndex) => {
+                                    const ordinal = card.referenceMedia.slice(0, mediaIndex + 1).filter((entry) => entry.kind === media.kind).length;
+                                    const label = "@" + (media.kind === "image" ? "Image" : "Video") + ordinal;
+                                    return (
+                                      <article className={styles.referenceMediaItem} key={media.id}>
+                                        {media.kind === "image" ? <img className={styles.referenceMediaPreview} src={media.asset.sourceUrl} alt={label} /> : <video className={styles.referenceMediaPreview} src={media.asset.sourceUrl} muted playsInline preload="metadata" />}
+                                        <div>
+                                          <strong>{label}</strong>
+                                          <span title={media.asset.originalName}>{media.asset.originalName}</span>
+                                          <small>{media.kind === "image" ? media.asset.width + " \u00D7 " + media.asset.height : media.asset.metadata.duration.toFixed(2) + "\uCD08 \u00B7 " + media.asset.metadata.width + " \u00D7 " + media.asset.metadata.height}</small>
+                                        </div>
+                                        <button type="button" className={styles.referenceMediaRemove} aria-label={label + " \uC81C\uAC70"} onClick={() => updateGenerationCard(card.id, (current) => ({ ...current, referenceMedia: current.referenceMedia.filter((entry) => entry.id !== media.id) }))} disabled={busy}><Trash2 size={12} /></button>
+                                      </article>
+                                    );
+                                  })}
+                                </div>
+                              ) : (
+                                <p className={styles.referenceMediaEmpty}>{"PNG \uB610\uB294 MP4\uB97C \uCD94\uAC00\uD558\uBA74 \uC0DD\uC131 \uACB0\uACFC\uC5D0 \uC2A4\uD0C0\uC77C\uACFC \uB3D9\uC791\uC744 \uCC38\uC870\uD569\uB2C8\uB2E4."}</p>
+                              )}
+                              <small className={styles.referenceMediaHint}>{"\uD504\uB86C\uD504\uD2B8\uC5D0 @Image1, @Video1\uCC98\uB7FC \uC21C\uC11C\uBCC4 \uC774\uB984\uC744 \uC4F0\uBA74 \uD574\uB2F9 \uB808\uD37C\uB7F0\uC2A4\uB97C \uC9C0\uC815\uD574 \uC124\uBA85\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4."}</small>
+                            </section>
+                            {card.referenceMediaError && <p className={styles.referenceImageError} role="alert">{card.referenceMediaError}</p>}
+                            {referenceError && <p className={styles.referenceImageError} role="alert">{referenceError}</p>}
+
+                            <div className={styles.aiOptions}>
+                              <label><span>{"\uAE38\uC774"}</span><input type="number" min={4} max={modelConfig.maxDuration} step={1} value={card.duration} disabled={busy} onChange={(event) => updateGenerationCard(card.id, (current) => ({ ...current, duration: Math.max(4, Math.min(modelConfig.maxDuration, Math.round(Number(event.target.value) || 4))), error: null }))} /></label>
+                              <label><span>{"\uD654\uC9C8"}</span><select value={card.resolution} disabled={busy} onChange={(event) => updateGenerationCard(card.id, (current) => ({ ...current, resolution: event.target.value as SeedanceResolution, error: null }))}><option value="480p">480p</option><option value="720p">720p</option><option value="1080p">1080p</option></select></label>
+                              <label className={styles.aiSound}><input type="checkbox" checked={card.soundEffects} disabled={busy} onChange={(event) => updateGenerationCard(card.id, (current) => ({ ...current, soundEffects: event.target.checked, error: null }))} /><span>{"\uD6A8\uACFC\uC74C \uC0DD\uC131"}</span></label>
+                            </div>
+                            <small className={styles.referenceMediaHint}>{"\uD604\uC7AC \uBAA8\uB378 \uC0DD\uC131 \uAE38\uC774: 4~"}{modelConfig.maxDuration}{"\uCD08"}</small>
+                            <div className={[styles.aiActions, styles.generationDraftActionsPrimary].filter(Boolean).join(" ")}>
+                              <button
+                                type="button"
+                                disabled={busy || !card.prompt.trim() || Boolean(referenceError)}
+                                onClick={() => void startGenerationForCard(card.id)}
+                              >
+                                {busy ? <LoaderCircle className={styles.spin} size={13} /> : card.job?.status === "completed" || card.job?.status === "failed" ? <RefreshCw size={13} /> : <Sparkles size={13} />}
+                                {busy ? "\uC0DD\uC131 \uC911" : card.job?.status === "completed" || card.job?.status === "failed" ? "\uB2E4\uC2DC \uC0DD\uC131" : "\uC0DD\uC131 \uC2DC\uC791"}
+                              </button>
+                            </div>
+                            {card.job && (
+                              <div className={[styles.generationStatus, statusClass].filter(Boolean).join(" ")}>
+                                {busy ? <LoaderCircle className={styles.spin} size={14} /> : card.job.status === "completed" ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
+                                <span>{card.job.stage}</span>
+                              </div>
+                            )}
+                            {error && <p className={styles.errorBox}>{error}</p>}
+                          </div>
+                        )}
+                      </article>
+                    );
+                  })}
                 </div>
               )}
-              {(generationError || generationJob?.error) && <p className={styles.errorBox}>{generationError || generationJob?.error}</p>}
-              <small className={styles.aiHint}>생성 요청마다 Magnific API 크레딧이 사용됩니다. 완료 영상은 Supabase에 저장됩니다.</small>
+              <p className={styles.aiHint}>{"\uAC01 \uC0DD\uC131 \uC694\uCCAD\uC740 Magnific API \uD06C\uB808\uB527\uC744 \uC0AC\uC6A9\uD558\uBA70, \uACB0\uACFC \uC601\uC0C1\uC740 \uC791\uC5C5 \uC21C\uC11C\uB300\uB85C \uD0C0\uC784\uB77C\uC778\uC5D0 \uC5F0\uACB0\uB429\uB2C8\uB2E4."}</p>
             </div>
           </div>
           <div

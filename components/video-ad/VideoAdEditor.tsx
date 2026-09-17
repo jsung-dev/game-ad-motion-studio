@@ -287,7 +287,7 @@ export function VideoAdEditor() {
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [items, setItems] = useState<TextItem[]>([]);
   const [graphics, setGraphics] = useState<GraphicItem[]>([]);
-  const [activeEditorMode, setActiveEditorMode] = useState<EditorMode>("video");
+  const [activeEditorMode, setActiveEditorMode] = useState<EditorMode>("generate");
   const [aspectMode, setAspectMode] = useState<AspectMode>("cover");
   const [outputRatio, setOutputRatio] = useState<OutputRatio>("9:16");
   const [uploading, setUploading] = useState(false);
@@ -1241,13 +1241,23 @@ export function VideoAdEditor() {
             <div className={styles.toolModeList}>
               <button
                 type="button"
+                className={activeEditorMode === "generate" ? styles.toolModeActive : ""}
+                aria-pressed={activeEditorMode === "generate"}
+                aria-controls="editor-panel-generate"
+                onClick={() => setActiveEditorMode("generate")}
+              >
+                <Sparkles size={16} />
+                <span><strong>{"AI \uCEF7 \uC0DD\uC131"}</strong><small>{"Seedance \uC0DD\uC131 \uB3C4\uAD6C"}</small></span>
+              </button>
+              <button
+                type="button"
                 className={activeEditorMode === "video" ? styles.toolModeActive : ""}
                 aria-pressed={activeEditorMode === "video"}
                 aria-controls="editor-panel-video"
                 onClick={() => setActiveEditorMode("video")}
               >
                 <Film size={16} />
-                <span><strong>{"\uC601\uC0C1"}</strong><small>{clips.length ? clips.length + "\uAC1C \uCEE7 \uD3B8\uC9D1 \uC911" : "\uC0C8 MP4 \uCD94\uAC00"}</small></span>
+                <span><strong>{"\uC601\uC0C1"}</strong><small>{clips.length ? clips.length + "\uAC1C \uCEF7 \uD3B8\uC9D1 \uC911" : "\uC0C8 MP4 \uCD94\uAC00"}</small></span>
               </button>
               <button
                 type="button"
@@ -1259,16 +1269,6 @@ export function VideoAdEditor() {
                 <Layers3 size={16} />
                 <span><strong>{"\uC790\uB9C9\u00B7PNG"}</strong><small>{items.length + graphics.length ? items.length + graphics.length + "\uAC1C \uB808\uC774\uC5B4" : "\uBB38\uAD6C\uC640 \uADF8\uB798\uD53D"}</small></span>
               </button>
-              <button
-                type="button"
-                className={activeEditorMode === "generate" ? styles.toolModeActive : ""}
-                aria-pressed={activeEditorMode === "generate"}
-                aria-controls="editor-panel-generate"
-                onClick={() => setActiveEditorMode("generate")}
-              >
-                <Sparkles size={16} />
-                <span><strong>{"AI \uCEE7 \uC0DD\uC131"}</strong><small>{"Seedance \uC0DD\uC131 \uB3C4\uAD6C"}</small></span>
-              </button>
             </div>
           </nav>
 
@@ -1276,7 +1276,7 @@ export function VideoAdEditor() {
           <div
             id="editor-panel-generate"
             role="region"
-            aria-label={"AI \uCEE7 \uC0DD\uC131"}
+            aria-label={"AI \uCEF7 \uC0DD\uC131"}
             hidden={activeEditorMode !== "generate"}
             className={`${styles.card} ${styles.generationCard}`}
           >

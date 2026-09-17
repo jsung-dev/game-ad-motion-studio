@@ -373,6 +373,12 @@ export function VideoAdEditor() {
   const [items, setItems] = useState<TextItem[]>([]);
   const [graphics, setGraphics] = useState<GraphicItem[]>([]);
   const [activeEditorMode, setActiveEditorMode] = useState<EditorMode>("generate");
+  const [lastEditingMode, setLastEditingMode] = useState<"video" | "captions">("video");
+  const isEditingMode = activeEditorMode !== "generate";
+  const selectEditingMode = (mode: "video" | "captions") => {
+    setLastEditingMode(mode);
+    setActiveEditorMode(mode);
+  };
   const [aspectMode, setAspectMode] = useState<AspectMode>("cover");
   const [outputRatio, setOutputRatio] = useState<OutputRatio>("9:16");
   const [uploading, setUploading] = useState(false);
@@ -1433,43 +1439,81 @@ export function VideoAdEditor() {
 
       <div className={styles.workspace}>
         <section className={styles.editorColumn}>
-          <nav className={styles.toolModeNav} aria-label={"\uD3B8\uC9D1 \uC791\uC5C5 \uB3C4\uAD6C"}>
+          <nav className={styles.toolModeNav} aria-label={"\uC791\uC5C5 \uC720\uD615 \uC120\uD0DD"}>
             <div className={styles.toolModeHeading}>
-              <strong>{"\uC791\uC5C5 \uB3C4\uAD6C"}</strong>
-              <span>{"\uD544\uC694\uD55C \uC791\uC5C5\uB9CC \uC5F4\uC5B4 \uD3B8\uC9D1\uD558\uC138\uC694."}</span>
+              <strong>{isEditingMode ? "\uD3B8\uC9D1 \uB3C4\uAD6C" : "\uC791\uC5C5 \uB3C4\uAD6C"}</strong>
+              <span>
+                {isEditingMode
+                  ? "\uC601\uC0C1 \uCEF7\uACFC \uC790\uB9C9\u00B7PNG\uB97C \uB2E4\uB4EC\uC73C\uC138\uC694."
+                  : "AI \uCEF7 \uC0DD\uC131\uC5D0 \uC9D1\uC911\uD558\uC138\uC694."}
+              </span>
             </div>
-            <div className={styles.toolModeList}>
+            <div className={styles.workspaceModeList}>
               <button
                 type="button"
-                className={activeEditorMode === "generate" ? styles.toolModeActive : ""}
+                className={activeEditorMode === "generate" ? styles.workspaceModeActive : ""}
                 aria-pressed={activeEditorMode === "generate"}
                 aria-controls="editor-panel-generate"
                 onClick={() => setActiveEditorMode("generate")}
               >
-                <Sparkles size={16} />
-                <span><strong>{"AI \uCEF7 \uC0DD\uC131"}</strong><small>{"Seedance \uC0DD\uC131 \uB3C4\uAD6C"}</small></span>
+                <span className={styles.workspaceModeIcon}>
+                  <Sparkles size={19} />
+                </span>
+                <span>
+                  <strong>{"\uC791\uC5C5 \uB3C4\uAD6C"}</strong>
+                  <small>
+                    {generationCards.length
+                      ? generationCards.length + "\uAC1C \uCEF7 \uC900\uBE44 \uC911"
+                      : "AI \uCEF7\u00B7\uB808\uD37C\uB7F0\uC2A4 \uC0DD\uC131"}
+                  </small>
+                </span>
               </button>
               <button
                 type="button"
-                className={activeEditorMode === "video" ? styles.toolModeActive : ""}
-                aria-pressed={activeEditorMode === "video"}
-                aria-controls="editor-panel-video"
-                onClick={() => setActiveEditorMode("video")}
+                className={isEditingMode ? styles.workspaceModeActive : ""}
+                aria-pressed={isEditingMode}
+                aria-controls={lastEditingMode === "captions" ? "editor-panel-captions" : "editor-panel-video"}
+                onClick={() => setActiveEditorMode(lastEditingMode)}
               >
-                <Film size={16} />
-                <span><strong>{"\uC601\uC0C1"}</strong><small>{clips.length ? clips.length + "\uAC1C \uCEF7 \uD3B8\uC9D1 \uC911" : "\uC0C8 MP4 \uCD94\uAC00"}</small></span>
-              </button>
-              <button
-                type="button"
-                className={activeEditorMode === "captions" ? styles.toolModeActive : ""}
-                aria-pressed={activeEditorMode === "captions"}
-                aria-controls="editor-panel-captions"
-                onClick={() => setActiveEditorMode("captions")}
-              >
-                <Layers3 size={16} />
-                <span><strong>{"\uC790\uB9C9\u00B7PNG"}</strong><small>{items.length + graphics.length ? items.length + graphics.length + "\uAC1C \uB808\uC774\uC5B4" : "\uBB38\uAD6C\uC640 \uADF8\uB798\uD53D"}</small></span>
+                <span className={styles.workspaceModeIcon}>
+                  <Settings2 size={19} />
+                </span>
+                <span>
+                  <strong>{"\uD3B8\uC9D1 \uB3C4\uAD6C"}</strong>
+                  <small>
+                    {clips.length || items.length || graphics.length
+                      ? "\uC601\uC0C1 \uCEF7\u00B7\uC790\uB9C9\u00B7PNG \uD3B8\uC9D1"
+                      : "\uC601\uC0C1\uACFC \uB808\uC774\uC5B4 \uCD94\uAC00"}
+                  </small>
+                </span>
               </button>
             </div>
+            {isEditingMode ? (
+              <div className={styles.editToolTabs} aria-label={"\uD3B8\uC9D1 \uB3C4\uAD6C \uC138\uBD80 \uC120\uD0DD"}>
+                <button
+                  type="button"
+                  className={activeEditorMode === "video" ? styles.editToolTabActive : ""}
+                  aria-pressed={activeEditorMode === "video"}
+                  aria-controls="editor-panel-video"
+                  onClick={() => selectEditingMode("video")}
+                >
+                  <Film size={16} />
+                  <span>{"\uC601\uC0C1 \uCEF7"}</span>
+                  <small>{clips.length ? clips.length + "\uAC1C" : "MP4"}</small>
+                </button>
+                <button
+                  type="button"
+                  className={activeEditorMode === "captions" ? styles.editToolTabActive : ""}
+                  aria-pressed={activeEditorMode === "captions"}
+                  aria-controls="editor-panel-captions"
+                  onClick={() => selectEditingMode("captions")}
+                >
+                  <Layers3 size={16} />
+                  <span>{"\uC790\uB9C9\u00B7PNG"}</span>
+                  <small>{items.length + graphics.length ? items.length + graphics.length + "\uAC1C" : "\uCD94\uAC00"}</small>
+                </button>
+              </div>
+            ) : null}
           </nav>
 
           <div className={styles.toolPanel}>
@@ -1778,13 +1822,13 @@ export function VideoAdEditor() {
             </div>
 
             <div className={styles.assetTools} aria-label="에셋 추가 도구">
-              <button type="button" onClick={() => { setActiveEditorMode("captions"); requestAnimationFrame(() => graphicInputRef.current?.click()); }} disabled={!asset || graphicUploading || graphics.length >= 10}>
+              <button type="button" onClick={() => { selectEditingMode("captions"); requestAnimationFrame(() => graphicInputRef.current?.click()); }} disabled={!asset || graphicUploading || graphics.length >= 10}>
                 {graphicUploading ? <LoaderCircle className={styles.spin} size={17} /> : <ImageIcon size={17} />}<span>PNG 글자</span><small>투명 이미지</small>
               </button>
               <button type="button" disabled title="배경 제거 기능은 준비 중입니다">
                 <Sparkles size={17} /><span>배경 제거</span><small>준비 중</small>
               </button>
-              <button type="button" onClick={() => { setActiveEditorMode("captions"); addItem(); }} disabled={!clips.length || items.length >= 20}>
+              <button type="button" onClick={() => { selectEditingMode("captions"); addItem(); }} disabled={!clips.length || items.length >= 20}>
                 <Type size={17} /><span>문구 추가</span><small>전체 타임라인</small>
               </button>
             </div>

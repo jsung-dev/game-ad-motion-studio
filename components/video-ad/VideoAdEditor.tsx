@@ -15,6 +15,16 @@ import {
   type RenderJobStatus, type SeedanceModel, type TextItem, type TextPosition, type VideoAdSequenceClip, type VideoAsset,
 } from "@/lib/video-ad/types";
 import type { SeedanceAspectRatio, SeedanceResolution } from "@/lib/video-ad/magnific";
+import {
+  SIMPLE_PROJECT_KEY,
+  createDefaultSimpleProject,
+  createStoryboardTemplates,
+  seedanceAspectRatioToOutputRatio,
+  outputRatioToSeedanceAspectRatio,
+  type SimpleProjectState,
+  type SimpleStep,
+  type StudioMode,
+} from "@/lib/video-ad/simple-project";
 import { getDurationInFrames, getGraphicItemErrors, getItemErrors, validateEditorPayload } from "@/lib/video-ad/validation";
 import { VideoAdSequenceComposition } from "@/remotion/AdComposition";
 import styles from "./VideoAdStudio.module.css";
@@ -52,8 +62,11 @@ type GenerationView = {
   fileSize: number | null;
 };
 
+type SimpleStoryboardRole = "hook" | "action" | "cta";
+
 type GenerationCard = {
   id: string;
+  storyboardRole?: SimpleStoryboardRole;
   prompt: string;
   model: SeedanceModel;
   aspectRatio: SeedanceAspectRatio;
@@ -88,9 +101,27 @@ type TimelineDrag = {
 type EditorMode = "video" | "captions" | "generate";
 type WorkspaceView = "work" | "edit";
 
+type StudioCapabilities = {
+  videoGeneration: boolean;
+  storyboardGeneration: boolean;
+  imageGeneration: boolean;
+  cloudUploads: boolean;
+};
+
+type PersistedEditorProject = {
+  version: 1;
+  clips: EditorClip[];
+  items: TextItem[];
+  graphics: GraphicItem[];
+  aspectMode: AspectMode;
+  outputRatio: OutputRatio;
+  selectedClipId: string | null;
+};
+
 const LAST_JOB_KEY = "video-ad:last-job";
 const LAST_GENERATION_KEY = "video-ad:last-generation";
 const GENERATION_CARDS_KEY = "video-ad:generation-cards";
+const EDITOR_PROJECT_KEY = "video-ad:editor-project:v1";
 const GENERATION_CARD_LIMIT = 8;
 const CLOUD_UPLOADS_ENABLED = process.env.NEXT_PUBLIC_VIDEO_STORAGE_MODE === "supabase";
 const motions: Array<{ value: MotionPreset; label: string }> = [
@@ -118,6 +149,17 @@ const seedanceAspectRatioOptions: Array<{
   { value: "social_story_9_16", label: "9:16", visualRatio: "9 / 16" },
   { value: "film_vertical_9_21", label: "9:21", visualRatio: "9 / 21" },
 ];
+const simpleStepLabels: Array<{ step: SimpleStep; label: string }> = [
+  { step: 1, label: "\uCE90\uB9AD\uD130" },
+  { step: 2, label: "\uAD11\uACE0 \uB0B4\uC6A9" },
+  { step: 3, label: "\uC2A4\uD1A0\uB9AC\uBCF4\uB4DC" },
+  { step: 4, label: "\uCEF7 \uC0DD\uC131" },
+  { step: 5, label: "\uCE74\uD53C\u00B7\uBBF8\uB9AC\uBCF4\uAE30" },
+];
+const simpleStoryboardRoleLabels: Record<SimpleStoryboardRole, string> = { hook: "\uD6C4\uD0B9", action: "\uC561\uC158\u00B7\uC7A5\uC810", cta: "CTA\u00B7\uB9C8\uBB34\uB9AC" };
+const simpleStoryboardRoles: SimpleStoryboardRole[] = ["hook", "action", "cta"];
+const simpleRatioValues: SeedanceAspectRatio[] = ["film_horizontal_21_9", "widescreen_16_9", "classic_4_3", "square_1_1", "traditional_3_4", "social_story_9_16"];
+
 const seedanceModelOptions: Record<SeedanceModel, {
   label: string;
   maxDuration: number;
@@ -135,6 +177,86 @@ const seedanceModelOptions: Record<SeedanceModel, {
   },
 };
 const decodeUnicodeEscapes = (value: string) => value.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
+
+const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object";
+const isFiniteNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+const isGraphicAsset = (value: unknown): value is GraphicAsset => {
+  if (!isRecord(value)) return false;
+  return typeof value.id === "string"
+    && typeof value.sourceUrl === "string"
+    && typeof value.originalName === "string"
+    && isFiniteNumber(value.width) && value.width > 0
+    && isFiniteNumber(value.height) && value.height > 0
+    && typeof value.hasAlpha === "boolean"
+    && typeof value.createdAt === "string";
+};
+const isVideoAsset = (value: unknown): value is VideoAsset => {
+  if (!isRecord(value) || !isRecord(value.metadata)) return false;
+  const metadata = value.metadata;
+  return typeof value.id === "string"
+    && typeof value.sourceUrl === "string"
+    && typeof value.originalName === "string"
+    && typeof value.createdAt === "string"
+    && isFiniteNumber(metadata.duration) && metadata.duration > 0
+    && isFiniteNumber(metadata.width) && metadata.width > 0
+    && isFiniteNumber(metadata.height) && metadata.height > 0
+    && isFiniteNumber(metadata.fps) && metadata.fps > 0
+    && typeof metadata.hasAudio === "boolean";
+};
+const isEditorClip = (value: unknown): value is EditorClip => {
+  if (!isRecord(value)) return false;
+  return typeof value.id === "string"
+    && isVideoAsset(value.asset)
+    && isFiniteNumber(value.fileSize) && value.fileSize >= 0
+    && typeof value.prompt === "string"
+    && isFiniteNumber(value.version)
+    && (typeof value.generationCardId === "undefined" || typeof value.generationCardId === "string");
+};
+const isTextItem = (value: unknown): value is TextItem => {
+  if (!isRecord(value)) return false;
+  return typeof value.id === "string"
+    && typeof value.text === "string"
+    && isFiniteNumber(value.start)
+    && isFiniteNumber(value.end)
+    && positions.some((entry) => entry.value === value.position)
+    && isFiniteNumber(value.fontSize)
+    && typeof value.color === "string"
+    && typeof value.strokeColor === "string"
+    && isFiniteNumber(value.strokeWidth)
+    && typeof value.shadow === "boolean"
+    && motions.some((entry) => entry.value === value.motion);
+};
+const isGraphicItem = (value: unknown): value is GraphicItem => {
+  if (!isRecord(value)) return false;
+  return typeof value.id === "string"
+    && typeof value.graphicId === "string"
+    && typeof value.sourceUrl === "string"
+    && typeof value.originalName === "string"
+    && isFiniteNumber(value.intrinsicWidth) && value.intrinsicWidth > 0
+    && isFiniteNumber(value.intrinsicHeight) && value.intrinsicHeight > 0
+    && isFiniteNumber(value.start)
+    && isFiniteNumber(value.end)
+    && isFiniteNumber(value.xPercent)
+    && isFiniteNumber(value.yPercent)
+    && isFiniteNumber(value.widthPercent)
+    && typeof value.shadow === "boolean"
+    && motions.some((entry) => entry.value === value.motion);
+};
+const isReferenceMedia = (value: unknown): value is ReferenceMedia => {
+  if (!isRecord(value) || typeof value.id !== "string") return false;
+  return value.kind === "image" ? isGraphicAsset(value.asset) : value.kind === "video" && isVideoAsset(value.asset);
+};
+const isGenerationView = (value: unknown): value is GenerationView => {
+  if (!isRecord(value)) return false;
+  return typeof value.id === "string"
+    && (value.targetClipId === null || typeof value.targetClipId === "string")
+    && typeof value.prompt === "string"
+    && ["generating", "importing", "completed", "failed"].includes(String(value.status))
+    && typeof value.stage === "string"
+    && (value.error === null || typeof value.error === "string")
+    && (value.asset === null || isVideoAsset(value.asset))
+    && (value.fileSize === null || (isFiniteNumber(value.fileSize) && value.fileSize >= 0));
+};
 
 const createGenerationCard = (id: string, expanded = false): GenerationCard => ({
   id,
@@ -158,6 +280,10 @@ const createGenerationCard = (id: string, expanded = false): GenerationCard => (
 
 const isGenerationCardBusy = (card: GenerationCard) => (
   card.isSubmitting || card.job?.status === "generating" || card.job?.status === "importing"
+);
+
+const isEmptyGenerationCard = (card: GenerationCard) => (
+  !card.prompt.trim() && !card.job && !card.referenceImage && card.referenceMedia.length === 0
 );
 
 const getGenerationCardReferenceError = (card: GenerationCard) => {
@@ -192,7 +318,26 @@ const generationStatusLabel = (card: GenerationCard) => {
   if (card.job?.status === "importing") return "\uAC00\uC838\uC624\uB294 \uC911";
   if (card.job?.status === "completed") return "\uC644\uB8CC";
   if (card.job?.status === "failed") return "\uC2E4\uD328";
-  return "\uC791\uC131 \uC911";
+  if (card.referenceImage || card.referenceMedia.length) return "\uC774\uBBF8\uC9C0 \uC900\uBE44";
+  return "\uCD08\uC548";
+};
+
+type SimpleCutStatus = "draft" | "image-ready" | "generating" | "completed" | "failed";
+
+const getSimpleCutStatus = (card: GenerationCard, hasCommonCharacter: boolean): SimpleCutStatus => {
+  if (card.job?.status === "completed") return "completed";
+  if (card.job?.status === "failed") return "failed";
+  if (card.isSubmitting || card.job?.status === "generating" || card.job?.status === "importing") return "generating";
+  if (card.referenceImage || card.referenceMedia.length || hasCommonCharacter) return "image-ready";
+  return "draft";
+};
+
+const simpleCutStatusLabel: Record<SimpleCutStatus, string> = {
+  draft: "\uCD08\uC548",
+  "image-ready": "\uC774\uBBF8\uC9C0 \uC900\uBE44",
+  generating: "\uC0DD\uC131 \uC911",
+  completed: "\uC644\uB8CC",
+  failed: "\uC2E4\uD328",
 };
 
 const timelineTracks = [
@@ -364,6 +509,10 @@ export function VideoAdEditor() {
   const referenceImageInputRef = useRef<HTMLInputElement>(null);
   const referenceMediaInputRef = useRef<HTMLInputElement>(null);
   const generationUploadTargetRef = useRef<{ cardId: string; kind: "image" | "media" } | null>(null);
+  const simpleCharacterInputRef = useRef<HTMLInputElement>(null);
+  const simpleCutImageInputRef = useRef<HTMLInputElement>(null);
+  const simpleCutImageTargetRef = useRef<string | null>(null);
+  const simpleStepHeadingRef = useRef<HTMLHeadingElement>(null);
   const generationPollInFlightRef = useRef(new Set<string>());
   const appliedGenerationJobIdsRef = useRef(new Set<string>());
   const playerRef = useRef<PlayerRef>(null);
@@ -393,6 +542,20 @@ export function VideoAdEditor() {
   const [generationCards, setGenerationCards] = useState<GenerationCard[]>([]);
   const [generationCardsReady, setGenerationCardsReady] = useState(false);
   const [generationBatchSubmitting, setGenerationBatchSubmitting] = useState(false);
+  const [studioMode, setStudioMode] = useState<StudioMode | null>(null);
+  const [simpleProject, setSimpleProject] = useState<SimpleProjectState>(() => createDefaultSimpleProject());
+  const [projectStateReady, setProjectStateReady] = useState(false);
+  const [capabilities, setCapabilities] = useState<StudioCapabilities | null>(null);
+  const [capabilityError, setCapabilityError] = useState<string | null>(null);
+  const [simpleCharacterUploading, setSimpleCharacterUploading] = useState(false);
+  const [simpleCharacterError, setSimpleCharacterError] = useState<string | null>(null);
+  const [simpleActionError, setSimpleActionError] = useState<string | null>(null);
+  const [projectSaveErrors, setProjectSaveErrors] = useState<Record<"simple" | "editor" | "cards", string | null>>({
+    simple: null,
+    editor: null,
+    cards: null,
+  });
+  const projectSaveError = projectSaveErrors.simple ?? projectSaveErrors.editor ?? projectSaveErrors.cards;
 
   const selectedClip = clips.find((clip) => clip.id === selectedClipId) ?? null;
   const asset = selectedClip?.asset ?? null;
@@ -472,6 +635,36 @@ export function VideoAdEditor() {
     .map((card) => `${card.id}:${card.job?.id ?? "submitting"}:${card.job?.status ?? "submitting"}`)
     .join("|");
 
+  const simpleStoryboardCards = useMemo(
+    () => simpleProject.storyboardCardIds
+      .map((cardId) => generationCards.find((card) => card.id === cardId))
+      .filter((card): card is GenerationCard => Boolean(card)),
+    [generationCards, simpleProject.storyboardCardIds],
+  );
+  const unlinkedGenerationCards = generationCards.filter((card) => !simpleProject.storyboardCardIds.includes(card.id) && !isEmptyGenerationCard(card));
+  const simpleGeneratedClipCount = simpleStoryboardCards.filter((card) => clips.some((clip) => clip.generationCardId === card.id)).length;
+  const simpleHasMixedAspectRatios = simpleStoryboardCards.some((card) => card.aspectRatio !== simpleProject.aspectRatio);
+  const simpleUploadsAvailable = CLOUD_UPLOADS_ENABLED && capabilities?.cloudUploads === true;
+  const simpleCopyItemExists = Boolean(simpleProject.copyItemId && items.some((item) => item.id === simpleProject.copyItemId));
+  const shouldUseSharedCharacter = (card: GenerationCard) => Boolean(
+    simpleProject.characterAsset
+      && simpleProject.storyboardCardIds.includes(card.id)
+      && card.model === "seedance-2-5-pro"
+      && !card.referenceImage,
+  );
+  const getEffectiveReferenceError = (card: GenerationCard) => {
+    const baseError = getGenerationCardReferenceError(card);
+    if (baseError) return baseError;
+    const sharedCharacter = simpleProject.characterAsset;
+    const alreadyIncluded = Boolean(sharedCharacter) && card.referenceMedia.some((media) => media.kind === "image" && media.asset.id === sharedCharacter?.id);
+    if (shouldUseSharedCharacter(card) && !alreadyIncluded && card.referenceMedia.filter((media) => media.kind === "image").length >= 30) {
+      return "\uACF5\uD1B5 \uCE90\uB9AD\uD130 \uB808\uD37C\uB7F0\uC2A4\uAE4C\uC9C0 \uD3EC\uD568\uD574 \uC774\uBBF8\uC9C0\uB294 \uCD5C\uB300 30\uAC1C\uAE4C\uC9C0 \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.";
+    }
+    return null;
+  };
+  const simpleCanGenerateAll = Boolean(capabilities?.videoGeneration) && simpleStoryboardCards.length > 0 && simpleStoryboardCards.every((card) => (
+    Boolean(card.prompt.trim()) && !isGenerationCardBusy(card) && !getEffectiveReferenceError(card)
+  )) && simpleStoryboardCards.some((card) => card.job?.status !== "completed");
 
   const timelineSegments = useMemo(() => {
     const video: Array<{ id: string; start: number; end: number }> = [];
@@ -492,6 +685,127 @@ export function VideoAdEditor() {
       ],
     };
   }, [clipFrameCounts, clipStartFrames, clips, graphics, items, previewFps]);
+
+  useEffect(() => {
+    const defaults = createDefaultSimpleProject();
+    try {
+      const stored = localStorage.getItem(SIMPLE_PROJECT_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored) as { version?: unknown; mode?: unknown; project?: Partial<SimpleProjectState> };
+        if (parsed.version !== undefined && parsed.version !== 1) throw new Error("Unsupported simple project version");
+        const project = parsed.project ?? {};
+        const validStep = [1, 2, 3, 4, 5].includes(Number(project.step)) ? Number(project.step) as SimpleStep : defaults.step;
+        const validRatio = seedanceAspectRatioOptions.some((option) => option.value === project.aspectRatio)
+          ? project.aspectRatio as SeedanceAspectRatio
+          : defaults.aspectRatio;
+        const validMotion = motions.some((motion) => motion.value === project.copyMotion)
+          ? project.copyMotion as MotionPreset
+          : defaults.copyMotion;
+        const characterAsset = isGraphicAsset(project.characterAsset) ? project.characterAsset : null;
+        setSimpleProject({
+          ...defaults,
+          step: validStep,
+          characterName: typeof project.characterName === "string" ? project.characterName : defaults.characterName,
+          continuityNote: typeof project.continuityNote === "string" ? project.continuityNote : defaults.continuityNote,
+          characterAsset,
+          subject: typeof project.subject === "string" ? project.subject : defaults.subject,
+          goal: typeof project.goal === "string" ? project.goal : defaults.goal,
+          mood: typeof project.mood === "string" ? project.mood : defaults.mood,
+          cta: typeof project.cta === "string" ? project.cta : defaults.cta,
+          aspectRatio: validRatio,
+          storyboardCardIds: Array.isArray(project.storyboardCardIds)
+            ? project.storyboardCardIds.filter((id): id is string => typeof id === "string").slice(0, GENERATION_CARD_LIMIT)
+            : [],
+          copyText: typeof project.copyText === "string" ? project.copyText : defaults.copyText,
+          copyMotion: validMotion,
+          copyItemId: typeof project.copyItemId === "string" ? project.copyItemId : null,
+        });
+      }
+    } catch {
+      localStorage.removeItem(SIMPLE_PROJECT_KEY);
+    }
+
+    try {
+      const stored = localStorage.getItem(EDITOR_PROJECT_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored) as Partial<PersistedEditorProject>;
+        if (parsed.version !== 1) throw new Error("Unsupported editor project version");
+        const restoredClips = Array.isArray(parsed.clips) ? parsed.clips.filter(isEditorClip) : [];
+        const restoredItems = Array.isArray(parsed.items) ? parsed.items.filter(isTextItem).slice(0, 20) : [];
+        const restoredGraphics = Array.isArray(parsed.graphics) ? parsed.graphics.filter(isGraphicItem).slice(0, 10) : [];
+        setClips(restoredClips);
+        setItems(restoredItems);
+        setGraphics(restoredGraphics);
+        setAspectMode(parsed.aspectMode === "contain" ? "contain" : "cover");
+        setOutputRatio(parsed.outputRatio && outputRatios.includes(parsed.outputRatio) ? parsed.outputRatio : "9:16");
+        const restoredSelectedId = typeof parsed.selectedClipId === "string" && restoredClips.some((clip) => clip.id === parsed.selectedClipId)
+          ? parsed.selectedClipId
+          : restoredClips[0]?.id ?? null;
+        setSelectedClipId(restoredSelectedId);
+      }
+    } catch {
+      localStorage.removeItem(EDITOR_PROJECT_KEY);
+    }
+
+    const requestedMode = new URLSearchParams(window.location.search).get("mode");
+    setStudioMode(requestedMode === "simple" || requestedMode === "expert" ? requestedMode : null);
+    setProjectStateReady(true);
+  }, []);
+
+  useEffect(() => {
+    setSelectedClipId((current) => current && clips.some((clip) => clip.id === current)
+      ? current
+      : clips[0]?.id ?? null);
+  }, [clips]);
+
+  useEffect(() => {
+    if (!projectStateReady) return;
+    try {
+      localStorage.setItem(SIMPLE_PROJECT_KEY, JSON.stringify({
+        version: 1,
+        mode: studioMode,
+        project: simpleProject,
+      }));
+      setProjectSaveErrors((current) => current.simple ? { ...current, simple: null } : current);
+    } catch {
+      setProjectSaveErrors((current) => ({ ...current, simple: "\uBE0C\uB77C\uC6B0\uC800 \uC800\uC7A5 \uACF5\uAC04\uC774 \uBD80\uC871\uD574 \uBCC0\uACBD \uB0B4\uC6A9\uC744 \uC790\uB3D9 \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4." }));
+    }
+  }, [projectStateReady, simpleProject, studioMode]);
+
+  useEffect(() => {
+    if (!projectStateReady) return;
+    const project: PersistedEditorProject = {
+      version: 1,
+      clips,
+      items,
+      graphics,
+      aspectMode,
+      outputRatio,
+      selectedClipId,
+    };
+    try {
+      localStorage.setItem(EDITOR_PROJECT_KEY, JSON.stringify(project));
+      setProjectSaveErrors((current) => current.editor ? { ...current, editor: null } : current);
+    } catch {
+      setProjectSaveErrors((current) => ({ ...current, editor: "\uBE0C\uB77C\uC6B0\uC800 \uC800\uC7A5 \uACF5\uAC04\uC774 \uBD80\uC871\uD574 \uD3B8\uC9D1 \uB0B4\uC6A9\uC744 \uC790\uB3D9 \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4." }));
+    }
+  }, [aspectMode, clips, graphics, items, outputRatio, projectStateReady, selectedClipId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/video-ad/generations", { cache: "no-store" })
+      .then((response) => responseJson<StudioCapabilities>(response))
+      .then((next) => {
+        if (!cancelled) setCapabilities(next);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCapabilities({ videoGeneration: false, storyboardGeneration: false, imageGeneration: false, cloudUploads: false });
+          setCapabilityError("\uD604\uC7AC \uC0DD\uC131 \uC5F0\uACB0 \uC0C1\uD0DC\uB97C \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.");
+        }
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const readJob = useCallback(async (jobId: string) => {
     const response = await fetch(`/api/video-ad/renders/${jobId}`, { cache: "no-store" });
@@ -551,18 +865,32 @@ export function VideoAdEditor() {
               .slice(0, GENERATION_CARD_LIMIT)
               .map((card) => {
                 const base = createGenerationCard(card.id, Boolean(card.expanded));
+                const model = card.model === "seedance-2-pro" || card.model === "seedance-2-5-pro" ? card.model : base.model;
+                const maxDuration = seedanceModelOptions[model].maxDuration;
+                const duration = isFiniteNumber(card.duration)
+                  ? Math.max(4, Math.min(maxDuration, Math.round(card.duration)))
+                  : base.duration;
+                const aspectRatio = seedanceAspectRatioOptions.some((option) => option.value === card.aspectRatio)
+                  ? card.aspectRatio as SeedanceAspectRatio
+                  : base.aspectRatio;
+                const resolution = card.resolution === "480p" || card.resolution === "720p" || card.resolution === "1080p"
+                  ? card.resolution
+                  : base.resolution;
                 return {
                   ...base,
                   ...card,
+                  id: card.id,
+                  storyboardRole: card.storyboardRole === "hook" || card.storyboardRole === "action" || card.storyboardRole === "cta" ? card.storyboardRole : undefined,
+                  expanded: Boolean(card.expanded),
                   prompt: typeof card.prompt === "string" ? decodeUnicodeEscapes(card.prompt) : base.prompt,
-                  model: card.model === "seedance-2-pro" || card.model === "seedance-2-5-pro" ? card.model : base.model,
-                  aspectRatio: card.aspectRatio ?? base.aspectRatio,
-                  duration: typeof card.duration === "number" ? card.duration : base.duration,
-                  resolution: card.resolution ?? base.resolution,
+                  model,
+                  aspectRatio,
+                  duration,
+                  resolution,
                   soundEffects: typeof card.soundEffects === "boolean" ? card.soundEffects : base.soundEffects,
-                  referenceImage: card.referenceImage ?? null,
-                  referenceMedia: Array.isArray(card.referenceMedia) ? card.referenceMedia : [],
-                  job: card.job ?? null,
+                  referenceImage: isGraphicAsset(card.referenceImage) ? card.referenceImage : null,
+                  referenceMedia: Array.isArray(card.referenceMedia) ? card.referenceMedia.filter(isReferenceMedia).slice(0, 40) : [],
+                  job: isGenerationView(card.job) ? card.job : null,
                   error: typeof card.error === "string" ? card.error : null,
                   referenceImageError: typeof card.referenceImageError === "string" ? card.referenceImageError : null,
                   referenceMediaError: typeof card.referenceMediaError === "string" ? card.referenceMediaError : null,
@@ -601,11 +929,7 @@ export function VideoAdEditor() {
       }
 
       if (!cancelled) {
-        setGenerationCards([
-          createGenerationCard(crypto.randomUUID(), true),
-          createGenerationCard(crypto.randomUUID()),
-          createGenerationCard(crypto.randomUUID()),
-        ]);
+        setGenerationCards([]);
         setGenerationCardsReady(true);
       }
     };
@@ -621,8 +945,27 @@ export function VideoAdEditor() {
       referenceImageUploading: false,
       referenceMediaUploading: false,
     }));
-    localStorage.setItem(GENERATION_CARDS_KEY, JSON.stringify(persistable));
+    try {
+      localStorage.setItem(GENERATION_CARDS_KEY, JSON.stringify(persistable));
+      setProjectSaveErrors((current) => current.cards ? { ...current, cards: null } : current);
+    } catch {
+      setProjectSaveErrors((current) => ({ ...current, cards: "\uBE0C\uB77C\uC6B0\uC800 \uC800\uC7A5 \uACF5\uAC04\uC774 \uBD80\uC871\uD574 \uCEF7 \uC124\uC815\uC744 \uC790\uB3D9 \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4." }));
+    }
   }, [generationCards, generationCardsReady]);
+
+  useEffect(() => {
+    if (!projectStateReady || !generationCardsReady) return;
+    const cardIds = new Set(generationCards.map((card) => card.id));
+    const itemIds = new Set(items.map((item) => item.id));
+    setSimpleProject((current) => {
+      const storyboardCardIds = [...new Set(current.storyboardCardIds.filter((id) => cardIds.has(id)))];
+      const copyItemId = current.copyItemId && itemIds.has(current.copyItemId) ? current.copyItemId : null;
+      const unchanged = storyboardCardIds.length === current.storyboardCardIds.length
+        && storyboardCardIds.every((id, index) => id === current.storyboardCardIds[index])
+        && copyItemId === current.copyItemId;
+      return unchanged ? current : { ...current, storyboardCardIds, copyItemId };
+    });
+  }, [generationCards, generationCardsReady, items, projectStateReady]);
 
   useEffect(() => {
     if (!generationPollKey) return;
@@ -763,7 +1106,7 @@ export function VideoAdEditor() {
       player.removeEventListener("ended", onEnded);
       player.removeEventListener("mutechange", onMuteChange);
     };
-  }, [clipStartFrames, clips, outputRatio, sequenceDurationInFrames, sequencePlayerKey]);
+  }, [clipStartFrames, clips, outputRatio, sequenceDurationInFrames, sequencePlayerKey, simpleProject.step, studioMode]);
 
   const uploadAsset = async (file: File) => {
     if (!file.name.toLowerCase().endsWith(".mp4")) {
@@ -1014,6 +1357,9 @@ export function VideoAdEditor() {
   const removeGenerationCard = (cardId: string) => {
     setGenerationCards((current) => current.filter((card) => card.id !== cardId));
     setClips((current) => current.filter((clip) => clip.generationCardId !== cardId));
+    setSimpleProject((current) => current.storyboardCardIds.includes(cardId)
+      ? { ...current, storyboardCardIds: current.storyboardCardIds.filter((id) => id !== cardId) }
+      : current);
   };
 
   const startGenerationForCard = async (cardId: string) => {
@@ -1024,9 +1370,18 @@ export function VideoAdEditor() {
       updateGenerationCard(cardId, (current) => ({ ...current, error: "\uC601\uC0C1 \uC124\uBA85\uC744 \uC785\uB825\uD574 \uC8FC\uC138\uC694." }));
       return false;
     }
-    const referenceError = getGenerationCardReferenceError(card);
+    const referenceError = getEffectiveReferenceError(card);
     if (referenceError) {
       updateGenerationCard(cardId, (current) => ({ ...current, error: referenceError }));
+      return false;
+    }
+    const sharedCharacter = shouldUseSharedCharacter(card) ? simpleProject.characterAsset : null;
+    const hasSharedCharacter = Boolean(sharedCharacter) && card.referenceMedia.some((media) => media.kind === "image" && media.asset.id === sharedCharacter?.id);
+    const effectiveReferenceMedia: ReferenceMedia[] = sharedCharacter && !hasSharedCharacter
+      ? [{ id: "shared-character-" + sharedCharacter.id, kind: "image", asset: sharedCharacter }, ...card.referenceMedia]
+      : card.referenceMedia;
+    if (effectiveReferenceMedia.filter((media) => media.kind === "image").length > 30) {
+      updateGenerationCard(cardId, (current) => ({ ...current, error: "\uACF5\uD1B5 \uCE90\uB9AD\uD130 \uB808\uD37C\uB7F0\uC2A4\uAE4C\uC9C0 \uD3EC\uD568\uD574 \uC774\uBBF8\uC9C0\uB294 \uCD5C\uB300 30\uAC1C\uAE4C\uC9C0 \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4." }));
       return false;
     }
 
@@ -1044,7 +1399,7 @@ export function VideoAdEditor() {
           aspectRatio: card.aspectRatio,
           soundEffects: card.soundEffects,
           imageAssetId: card.referenceImage?.id ?? null,
-          referenceMedia: card.referenceMedia.map((media) => ({ kind: media.kind, assetId: media.asset.id })),
+          referenceMedia: effectiveReferenceMedia.map((media) => ({ kind: media.kind, assetId: media.asset.id })),
         }),
       });
       const created = await responseJson<GenerationView>(response);
@@ -1068,6 +1423,166 @@ export function VideoAdEditor() {
       .filter((card) => !isGenerationCardBusy(card) && card.job?.status !== "completed" && Boolean(card.prompt.trim()))
       .map((card) => card.id);
     if (!cardIds.length) return;
+    setGenerationBatchSubmitting(true);
+    try {
+      let cursor = 0;
+      const requestWorker = async () => {
+        while (cursor < cardIds.length) {
+          const cardId = cardIds[cursor];
+          cursor += 1;
+          await startGenerationForCard(cardId);
+        }
+      };
+      await Promise.all([requestWorker(), requestWorker()]);
+    } finally {
+      setGenerationBatchSubmitting(false);
+    }
+  };
+
+  const chooseStudioMode = (mode: StudioMode | null) => {
+    setStudioMode(mode);
+    const url = new URL(window.location.href);
+    if (mode) url.searchParams.set("mode", mode);
+    else url.searchParams.delete("mode");
+    window.history.replaceState({}, "", url);
+  };
+
+  const changeSimpleStep = (step: SimpleStep) => {
+    setSimpleActionError(null);
+    setSimpleProject((current) => ({ ...current, step }));
+    requestAnimationFrame(() => {
+      simpleStepHeadingRef.current?.focus();
+      document.querySelector<HTMLElement>(`[data-simple-step="${step}"]`)?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+    });
+  };
+
+  const updateSimpleAspectRatio = (aspectRatio: SeedanceAspectRatio) => {
+    setSimpleProject((current) => ({ ...current, aspectRatio }));
+    setOutputRatio(seedanceAspectRatioToOutputRatio(aspectRatio));
+    const storyboardIds = new Set(simpleProject.storyboardCardIds);
+    setGenerationCards((current) => current.map((card) => (
+      storyboardIds.has(card.id) ? { ...card, aspectRatio, error: null } : card
+    )));
+  };
+
+  const updateProjectOutputRatio = (ratio: OutputRatio) => {
+    setOutputRatio(ratio);
+    setSimpleProject((current) => ({ ...current, aspectRatio: outputRatioToSeedanceAspectRatio(ratio) }));
+  };
+
+  const createSimpleStoryboard = () => {
+    const templates = createStoryboardTemplates(simpleProject);
+    const blankCards = generationCards.filter(isEmptyGenerationCard).slice(0, templates.length);
+    const requiredNewCards = templates.length - blankCards.length;
+    if (generationCards.length + requiredNewCards > GENERATION_CARD_LIMIT) {
+      setSimpleActionError("\uD3B8\uC9D1 \uC911\uC778 \uCEF7\uC744 \uD3EC\uD568\uD574 \uCD5C\uB300 8\uAC1C\uAE4C\uC9C0 \uB9CC\uB4E4 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uC804\uBB38\uAC00\uC6A9\uC5D0\uC11C \uC0AC\uC6A9\uD558\uC9C0 \uC54A\uB294 \uCEF7\uC744 \uC815\uB9AC\uD574 \uC8FC\uC138\uC694.");
+      return;
+    }
+    const nextCards = generationCards.map((card) => ({ ...card, expanded: false }));
+    const storyboardCardIds: string[] = [];
+    templates.forEach((prompt, index) => {
+      const reusable = blankCards[index];
+      if (reusable) {
+        const cardIndex = nextCards.findIndex((card) => card.id === reusable.id);
+        nextCards[cardIndex] = {
+          ...nextCards[cardIndex],
+          prompt,
+          storyboardRole: simpleStoryboardRoles[index],
+          model: "seedance-2-5-pro",
+          aspectRatio: simpleProject.aspectRatio,
+          expanded: index === 0,
+          error: null,
+        };
+        storyboardCardIds.push(reusable.id);
+        return;
+      }
+      const card = createGenerationCard(crypto.randomUUID(), index === 0);
+      card.prompt = prompt;
+      card.storyboardRole = simpleStoryboardRoles[index];
+      card.aspectRatio = simpleProject.aspectRatio;
+      nextCards.push(card);
+      storyboardCardIds.push(card.id);
+    });
+    setGenerationCards(nextCards);
+    setSimpleProject((current) => ({
+      ...current,
+      storyboardCardIds,
+      copyText: current.copyText || current.cta,
+    }));
+    setSimpleActionError(null);
+  };
+
+  const connectExistingCardsToSimple = () => {
+    const existingIds = generationCards.filter((card) => !isEmptyGenerationCard(card)).map((card) => card.id).slice(0, GENERATION_CARD_LIMIT);
+    if (!existingIds.length) {
+      setSimpleActionError("\uC5F0\uACB0\uD560 \uAE30\uC874 \uCEF7\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.");
+      return;
+    }
+    setSimpleProject((current) => ({ ...current, storyboardCardIds: existingIds }));
+    setSimpleActionError(null);
+  };
+
+  const addSimpleStoryboardCut = () => {
+    if (simpleProject.storyboardCardIds.length >= GENERATION_CARD_LIMIT) {
+      setSimpleActionError("\uC2A4\uD1A0\uB9AC\uBCF4\uB4DC\uB294 \uCD5C\uB300 8\uCEF7\uAE4C\uC9C0 \uB9CC\uB4E4 \uC218 \uC788\uC2B5\uB2C8\uB2E4.");
+      return;
+    }
+    const reusable = generationCards.find((card) => !simpleProject.storyboardCardIds.includes(card.id) && isEmptyGenerationCard(card));
+    if (reusable) {
+      setSimpleProject((current) => ({ ...current, storyboardCardIds: [...current.storyboardCardIds, reusable.id] }));
+      setGenerationCards((current) => current.map((card) => card.id === reusable.id ? { ...card, storyboardRole: undefined, expanded: true, aspectRatio: simpleProject.aspectRatio } : { ...card, expanded: false }));
+      setSimpleActionError(null);
+      return;
+    }
+    if (generationCards.length >= GENERATION_CARD_LIMIT) {
+      setSimpleActionError("\uC804\uBB38\uAC00\uC6A9 \uCEF7\uC744 \uD3EC\uD568\uD574 \uCD5C\uB300 8\uAC1C\uAE4C\uC9C0 \uCD94\uAC00\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.");
+      return;
+    }
+    const card = createGenerationCard(crypto.randomUUID(), true);
+    card.aspectRatio = simpleProject.aspectRatio;
+    setGenerationCards((current) => [...current.map((entry) => ({ ...entry, expanded: false })), card]);
+    setSimpleProject((current) => ({ ...current, storyboardCardIds: [...current.storyboardCardIds, card.id] }));
+    setSimpleActionError(null);
+  };
+
+  const removeSimpleStoryboardCut = (cardId: string) => {
+    removeGenerationCard(cardId);
+    setSimpleProject((current) => ({
+      ...current,
+      storyboardCardIds: current.storyboardCardIds.filter((id) => id !== cardId),
+    }));
+  };
+
+  const moveSimpleStoryboardCut = (cardId: string, direction: -1 | 1) => {
+    const currentIndex = simpleProject.storyboardCardIds.indexOf(cardId);
+    const targetIndex = currentIndex + direction;
+    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= simpleProject.storyboardCardIds.length) return;
+    const nextIds = [...simpleProject.storyboardCardIds];
+    [nextIds[currentIndex], nextIds[targetIndex]] = [nextIds[targetIndex], nextIds[currentIndex]];
+    const reorderedStoryCards = nextIds
+      .map((id) => generationCards.find((card) => card.id === id))
+      .filter((card): card is GenerationCard => Boolean(card));
+    let storyCursor = 0;
+    const nextCards = generationCards.map((card) => (
+      nextIds.includes(card.id) ? reorderedStoryCards[storyCursor++] : card
+    ));
+    const cardOrder = new Map(nextCards.map((card, index) => [card.id, index]));
+    setGenerationCards(nextCards);
+    setSimpleProject((current) => ({ ...current, storyboardCardIds: nextIds }));
+    setClips((current) => {
+      const manual = current.filter((clip) => !clip.generationCardId);
+      const generated = current
+        .filter((clip) => clip.generationCardId)
+        .sort((left, right) => (cardOrder.get(left.generationCardId!) ?? Number.MAX_SAFE_INTEGER) - (cardOrder.get(right.generationCardId!) ?? Number.MAX_SAFE_INTEGER));
+      return [...manual, ...generated];
+    });
+  };
+
+  const startSimpleGeneration = async () => {
+    const cardIds = simpleStoryboardCards
+      .filter((card) => card.job?.status !== "completed" && !isGenerationCardBusy(card) && Boolean(card.prompt.trim()) && !getEffectiveReferenceError(card))
+      .map((card) => card.id);
+    if (!capabilities?.videoGeneration || !cardIds.length) return;
     setGenerationBatchSubmitting(true);
     try {
       let cursor = 0;
@@ -1151,7 +1666,7 @@ export function VideoAdEditor() {
       return;
     }
     if (!CLOUD_UPLOADS_ENABLED) {
-      updateGenerationCard(cardId, (current) => ({ ...current, referenceImageError: "\uC2DC\uC791 \uC774\uBBF8\uC9C0 \uAE30\uB2A5\uC740 Supabase \uC800\uC7A5\uC18C\uAC00 \uC5F0\uACB0\uB41C \uBC30\uD3EC \uD658\uACBD\uC5D0\uC11C \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4." }));
+      updateGenerationCard(cardId, (current) => ({ ...current, referenceImageError: "\uD604\uC7AC \uD658\uACBD\uC5D0\uC11C\uB294 \uC2DC\uC791 \uC774\uBBF8\uC9C0 \uC5C5\uB85C\uB4DC\uB97C \uC0AC\uC6A9\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4." }));
       return;
     }
     if (!file.name.toLowerCase().endsWith(".png")) {
@@ -1179,7 +1694,7 @@ export function VideoAdEditor() {
     const card = generationCards.find((entry) => entry.id === cardId);
     if (!card || !files.length) return;
     if (!CLOUD_UPLOADS_ENABLED) {
-      updateGenerationCard(cardId, (current) => ({ ...current, referenceMediaError: "\uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4\uB294 Supabase \uC800\uC7A5\uC18C\uAC00 \uC5F0\uACB0\uB41C \uBC30\uD3EC \uD658\uACBD\uC5D0\uC11C \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4." }));
+      updateGenerationCard(cardId, (current) => ({ ...current, referenceMediaError: "\uD604\uC7AC \uD658\uACBD\uC5D0\uC11C\uB294 \uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4 \uC5C5\uB85C\uB4DC\uB97C \uC0AC\uC6A9\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4." }));
       return;
     }
     if (card.model !== "seedance-2-5-pro") {
@@ -1254,6 +1769,32 @@ export function VideoAdEditor() {
     if (referenceMediaInputRef.current) referenceMediaInputRef.current.value = "";
   };
 
+
+  const uploadSimpleCharacter = async (file: File) => {
+    setSimpleCharacterError(null);
+    if (!CLOUD_UPLOADS_ENABLED || capabilities?.cloudUploads === false) {
+      setSimpleCharacterError("\uD604\uC7AC \uD658\uACBD\uC5D0\uC11C\uB294 \uCE90\uB9AD\uD130 \uC774\uBBF8\uC9C0 \uC5C5\uB85C\uB4DC\uB97C \uC0AC\uC6A9\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.");
+      return;
+    }
+    if (!file.name.toLowerCase().endsWith(".png")) {
+      setSimpleCharacterError("\uD604\uC7AC \uCE90\uB9AD\uD130 \uC774\uBBF8\uC9C0\uB294 PNG \uD30C\uC77C\uB9CC \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.");
+      return;
+    }
+    if (file.size > MAX_GRAPHIC_BYTES) {
+      setSimpleCharacterError("PNG\uB294 \uCD5C\uB300 10MB\uAE4C\uC9C0 \uC5C5\uB85C\uB4DC\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.");
+      return;
+    }
+    setSimpleCharacterUploading(true);
+    try {
+      const result = await uploadToCloud<{ asset: GraphicAsset }>("graphic", file);
+      setSimpleProject((current) => ({ ...current, characterAsset: result.asset }));
+    } catch (error) {
+      setSimpleCharacterError(error instanceof Error ? error.message : "\uCE90\uB9AD\uD130 \uC774\uBBF8\uC9C0\uB97C \uC5C5\uB85C\uB4DC\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.");
+    } finally {
+      setSimpleCharacterUploading(false);
+      if (simpleCharacterInputRef.current) simpleCharacterInputRef.current.value = "";
+    }
+  };
 
   const updateGraphic = <K extends keyof GraphicItem>(id: string, key: K, value: GraphicItem[K]) => {
     setGraphics((current) =>
@@ -1377,6 +1918,38 @@ export function VideoAdEditor() {
     ]);
   };
 
+  const applySimpleCopy = () => {
+    if (!clips.length || totalClipDuration <= 0) {
+      setSimpleActionError("\uBBF8\uB9AC\uBCF4\uAE30\uD560 \uC601\uC0C1 \uCEF7\uC744 \uBA3C\uC800 \uC900\uBE44\uD574 \uC8FC\uC138\uC694.");
+      return;
+    }
+    const text = (simpleProject.copyText || simpleProject.cta).trim();
+    if (!text) {
+      setSimpleActionError("\uD654\uBA74\uC5D0 \uD45C\uC2DC\uD560 \uCE74\uD53C\uB97C \uC785\uB825\uD574 \uC8FC\uC138\uC694.");
+      return;
+    }
+    const existing = simpleProject.copyItemId ? items.find((item) => item.id === simpleProject.copyItemId) : null;
+    if (!existing && items.length >= 20) {
+      setSimpleActionError("\uC790\uB9C9\uC740 \uCD5C\uB300 20\uAC1C\uAE4C\uC9C0 \uCD94\uAC00\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uC804\uBB38\uAC00\uC6A9\uC5D0\uC11C \uAE30\uC874 \uC790\uB9C9\uC744 \uC815\uB9AC\uD574 \uC8FC\uC138\uC694.");
+      return;
+    }
+    const copyItem: TextItem = {
+      ...(existing ?? createDefaultTextItem()),
+      id: existing?.id ?? crypto.randomUUID(),
+      text,
+      start: Number((totalClipDuration * 2 / 3).toFixed(3)),
+      end: Number(totalClipDuration.toFixed(3)),
+      position: "bottom",
+      motion: simpleProject.copyMotion,
+    };
+    setItems((current) => existing
+      ? current.map((item) => item.id === existing.id ? copyItem : item)
+      : [...current, copyItem]);
+    setSimpleProject((current) => ({ ...current, copyItemId: copyItem.id, copyText: text }));
+    setSimpleActionError(null);
+    seekToTextPreview(copyItem.start, copyItem.end);
+  };
+
   const startRender = async () => {
     if (!asset || activeJob) return;
     setRenderError(null);
@@ -1412,6 +1985,309 @@ export function VideoAdEditor() {
     }
   };
 
+  const renderSimpleStep = () => {
+    if (simpleProject.step === 1) {
+      return (
+        <section className={styles.simpleStepPanel} aria-labelledby="simple-step-heading">
+          <div className={styles.simpleStepHeader}>
+            <span>STEP 1</span>
+            <h2 id="simple-step-heading" ref={simpleStepHeadingRef} tabIndex={-1}>{"\uCE90\uB9AD\uD130 \uB4F1\uB85D"}</h2>
+            <p>{"\uC601\uC0C1\uC5D0\uC11C \uACC4\uC18D \uC720\uC9C0\uD560 \uCE90\uB9AD\uD130\uC640 \uD575\uC2EC \uC678\uD615\uC744 \uC815\uB9AC\uD569\uB2C8\uB2E4."}</p>
+          </div>
+          <input
+            ref={simpleCharacterInputRef}
+            className={styles.hiddenInput}
+            type="file"
+            accept="image/png,.png"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void uploadSimpleCharacter(file);
+              event.currentTarget.value = "";
+            }}
+          />
+          <div className={styles.simpleCharacterLayout}>
+            <div className={styles.simpleCharacterAsset}>
+              <div className={styles.simpleCharacterPreview}>
+                {simpleProject.characterAsset ? (
+                  <img src={simpleProject.characterAsset.sourceUrl} alt={"\uB4F1\uB85D\uD55C \uCE90\uB9AD\uD130 \uBBF8\uB9AC\uBCF4\uAE30"} />
+                ) : (
+                  <span><ImageIcon size={34} /><strong>{"\uCE90\uB9AD\uD130 PNG"}</strong><small>{"\uC120\uD0DD \uC785\uB825"}</small></span>
+                )}
+              </div>
+              <div className={styles.simpleAssetActions}>
+                <button type="button" onClick={() => simpleCharacterInputRef.current?.click()} disabled={simpleCharacterUploading || !simpleUploadsAvailable}>
+                  {simpleCharacterUploading ? <LoaderCircle className={styles.spin} size={15} /> : <UploadCloud size={15} />}
+                  {simpleCharacterUploading ? "\uC5C5\uB85C\uB4DC \uC911" : simpleProject.characterAsset ? "\uC774\uBBF8\uC9C0 \uAD50\uCCB4" : "PNG \uCD94\uAC00"}
+                </button>
+                {simpleProject.characterAsset && (
+                  <button type="button" onClick={() => setSimpleProject((current) => ({ ...current, characterAsset: null }))}>
+                    <Trash2 size={14} /> {"\uD504\uB85C\uC81D\uD2B8\uC5D0\uC11C \uC81C\uAC70"}
+                  </button>
+                )}
+              </div>
+              <small className={styles.simpleHelp}>{capabilities === null ? "\uC5C5\uB85C\uB4DC \uC0C1\uD0DC \uD655\uC778 \uC911" : simpleUploadsAvailable ? "PNG \u00B7 \uCD5C\uB300 10MB" : "\uD604\uC7AC \uD658\uACBD\uC5D0\uC11C\uB294 \uC774\uBBF8\uC9C0 \uC5C5\uB85C\uB4DC\uB97C \uC0AC\uC6A9\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4."}</small>
+            </div>
+            <div className={styles.simpleFormStack}>
+              <label className={styles.simpleField}>
+                <span>{"\uCE90\uB9AD\uD130 \uC774\uB984"}<em>{"\uC120\uD0DD"}</em></span>
+                <input value={simpleProject.characterName} maxLength={60} placeholder={"\uC608: \uB85C\uBE48"} onChange={(event) => setSimpleProject((current) => ({ ...current, characterName: event.target.value }))} />
+              </label>
+              <label className={styles.simpleField}>
+                <span>{"\uC678\uD615 \uC720\uC9C0 \uBA54\uBAA8"}<em>{"\uC120\uD0DD"}</em></span>
+                <textarea rows={5} value={simpleProject.continuityNote} maxLength={500} placeholder={"\uC608: \uB178\uB780 \uB450\uAC74, \uCD08\uB85D \uD314\uCC0C, \uC55E\uC73C\uB85C \uBA58 \uAC00\uBC29\uC744 \uC720\uC9C0"} onChange={(event) => setSimpleProject((current) => ({ ...current, continuityNote: event.target.value }))} />
+              </label>
+              <p className={styles.simpleInfo}><CheckCircle2 size={15} /> {"\uC5C5\uB85C\uB4DC\uD55C \uC774\uBBF8\uC9C0\uB294 \uD574\uB2F9 \uD504\uB85C\uC81D\uD2B8\uC758 \uACF5\uD1B5 \uCE90\uB9AD\uD130 \uB808\uD37C\uB7F0\uC2A4\uB85C \uC0AC\uC6A9\uB429\uB2C8\uB2E4."}</p>
+            </div>
+          </div>
+          {simpleCharacterError && <p className={styles.simpleError} role="alert"><AlertTriangle size={15} /> {simpleCharacterError}</p>}
+        </section>
+      );
+    }
+
+    if (simpleProject.step === 2) {
+      return (
+        <section className={styles.simpleStepPanel} aria-labelledby="simple-step-heading">
+          <div className={styles.simpleStepHeader}>
+            <span>STEP 2</span>
+            <h2 id="simple-step-heading" ref={simpleStepHeadingRef} tabIndex={-1}>{"\uAD11\uACE0 \uB0B4\uC6A9 \uC785\uB825"}</h2>
+            <p>{"\uC9E7\uC740 \uB2E8\uC5B4\uB85C \uD575\uC2EC\uB9CC \uC801\uC73C\uBA74 3\uCEF7 \uAE30\uBCF8 \uD2C0\uC744 \uB9CC\uB4E4 \uC218 \uC788\uC2B5\uB2C8\uB2E4."}</p>
+          </div>
+          <div className={styles.simpleFieldGrid}>
+            <label className={styles.simpleField}>
+              <span>{"\uAC8C\uC784 \uB610\uB294 \uAD11\uACE0 \uB300\uC0C1"}<strong>{"\uD544\uC218"}</strong></span>
+              <input value={simpleProject.subject} maxLength={120} placeholder={"\uC608: \uC2E0\uADDC \uC218\uC9D1\uD615 RPG"} onChange={(event) => setSimpleProject((current) => ({ ...current, subject: event.target.value }))} />
+            </label>
+            <label className={styles.simpleField}>
+              <span>{"\uAD11\uACE0 \uBAA9\uC801"}<em>{"\uC120\uD0DD"}</em></span>
+              <input value={simpleProject.goal} maxLength={160} placeholder={"\uC608: \uC2E0\uADDC \uC720\uC800 \uC0AC\uC804 \uB4F1\uB85D"} onChange={(event) => setSimpleProject((current) => ({ ...current, goal: event.target.value }))} />
+            </label>
+            <label className={styles.simpleField}>
+              <span>{"\uC601\uC0C1 \uBD84\uC704\uAE30"}<em>{"\uC120\uD0DD"}</em></span>
+              <input value={simpleProject.mood} maxLength={120} placeholder={"\uC608: \uC18D\uB3C4\uAC10 \uC788\uACE0 \uD1B5\uCF8C\uD55C \uC804\uD22C"} onChange={(event) => setSimpleProject((current) => ({ ...current, mood: event.target.value }))} />
+            </label>
+            <label className={styles.simpleField}>
+              <span>{"\uD575\uC2EC \uBB38\uAD6C\u00B7CTA"}<em>{"\uC120\uD0DD"}</em></span>
+              <input value={simpleProject.cta} maxLength={100} placeholder={"\uC608: \uC9C0\uAE08 \uD50C\uB808\uC774"} onChange={(event) => { const cta = event.target.value; setSimpleProject((current) => ({ ...current, cta, copyText: !current.copyText || current.copyText === current.cta ? cta : current.copyText })); }} />
+            </label>
+          </div>
+          <fieldset className={styles.simpleRatioFieldset}>
+            <legend>{"\uAE30\uBCF8 \uD654\uBA74 \uBE44\uC728"}</legend>
+            <div className={styles.simpleRatioGrid}>
+              {seedanceAspectRatioOptions.filter((option) => simpleRatioValues.includes(option.value)).map((option) => (
+                <button key={option.value} type="button" className={simpleProject.aspectRatio === option.value ? styles.simpleRatioActive : ""} aria-pressed={simpleProject.aspectRatio === option.value} onClick={() => updateSimpleAspectRatio(option.value)}>
+                  <span style={{ aspectRatio: option.visualRatio }} />
+                  <strong>{option.label}</strong>
+                </button>
+              ))}
+            </div>
+            <small>{"\uAE30\uBCF8\uC740 \uC138\uB85C\uD615 9:16\uC785\uB2C8\uB2E4. \uC774 \uC124\uC815\uC740 \uCEF7 \uC0DD\uC131\uACFC \uCD9C\uB825 \uBE44\uC728\uC5D0 \uD568\uAED8 \uBC18\uC601\uB429\uB2C8\uB2E4."}</small>
+          </fieldset>
+          {simpleHasMixedAspectRatios && <p className={styles.simpleNotice}><AlertTriangle size={15} /> {"\uC804\uBB38\uAC00\uC6A9\uC5D0\uC11C \uAC1C\uBCC4 \uBE44\uC728\uC744 \uC9C0\uC815\uD55C \uCEF7\uC774 \uC788\uC2B5\uB2C8\uB2E4. \uC704 \uBE44\uC728\uC744 \uC120\uD0DD\uD558\uBA74 \uAC04\uD3B8 \uC2A4\uD1A0\uB9AC\uBCF4\uB4DC \uCEF7\uC744 \uBAA8\uB450 \uAC19\uC740 \uBE44\uC728\uB85C \uB9DE\uCD95\uB2C8\uB2E4."}</p>}
+        </section>
+      );
+    }
+
+    if (simpleProject.step === 3) {
+      return (
+        <section className={styles.simpleStepPanel} aria-labelledby="simple-step-heading">
+          <div className={styles.simpleStepHeader}>
+            <span>STEP 3</span>
+            <h2 id="simple-step-heading" ref={simpleStepHeadingRef} tabIndex={-1}>{"\uC2A4\uD1A0\uB9AC\uBCF4\uB4DC \uD655\uC778"}</h2>
+            <p>{"\uD6C4\uD0B9, \uC561\uC158\u00B7\uC7A5\uC810, CTA \uC21C\uC11C\uB85C \uC7A5\uBA74 \uC124\uBA85\uC744 \uB2E4\uB4EC\uC73C\uC138\uC694."}</p>
+          </div>
+          {!capabilities?.storyboardGeneration && (
+            <p className={styles.simpleNotice}><Layers3 size={15} /> {"\uC2A4\uD1A0\uB9AC\uBCF4\uB4DC \uBB38\uC7A5 \uC0DD\uC131 AI\uB294 \uC544\uC9C1 \uC5F0\uACB0\uB418\uC5B4 \uC788\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uC544\uB798 \uBC84\uD2BC\uC740 \uC785\uB825 \uB0B4\uC6A9\uC744 \uBC18\uC601\uD55C \uD3B8\uC9D1 \uAC00\uB2A5\uD55C 3\uCEF7 \uAE30\uBCF8 \uD15C\uD50C\uB9BF\uC744 \uB9CC\uB4ED\uB2C8\uB2E4."}</p>
+          )}
+          {simpleStoryboardCards.length === 0 ? (
+            <div className={styles.simpleEmptyState}>
+              <span><Layers3 size={30} /></span>
+              <strong>{"\uC544\uC9C1 \uC2A4\uD1A0\uB9AC\uBCF4\uB4DC \uCEF7\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."}</strong>
+              <p>{"\uAE30\uBCF8 3\uCEF7\uC744 \uB9CC\uB4E4\uAC70\uB098, \uC774\uBBF8 \uC791\uC131\uD55C \uC804\uBB38\uAC00\uC6A9 \uCEF7\uC744 \uADF8\uB300\uB85C \uC5F0\uACB0\uD558\uC138\uC694."}</p>
+              <div>
+                <button type="button" className={styles.simplePrimaryButton} onClick={createSimpleStoryboard}><Sparkles size={16} /> {"3\uCEF7 \uAE30\uBCF8 \uD15C\uD50C\uB9BF \uB9CC\uB4E4\uAE30"}</button>
+                {unlinkedGenerationCards.length > 0 && <button type="button" className={styles.simpleSecondaryButton} onClick={connectExistingCardsToSimple}><Film size={16} /> {"\uAE30\uC874 "}{unlinkedGenerationCards.length}{"\uAC1C \uCEF7 \uC5F0\uACB0"}</button>}
+              </div>
+            </div>
+          ) : (
+            <div className={styles.simpleStoryboardList}>
+              {simpleStoryboardCards.map((card, index) => {
+                const status = getSimpleCutStatus(card, shouldUseSharedCharacter(card));
+                return (
+                  <article className={styles.simpleStoryboardCard} key={card.id}>
+                    <header>
+                      <span className={styles.simpleCutNumber}>{index + 1}</span>
+                      <div><strong>{card.storyboardRole ? simpleStoryboardRoleLabels[card.storyboardRole] : "\uCEF7 " + (index + 1)}</strong><small className={styles.simpleStatus} data-status={status} role="status" aria-live="polite">{simpleCutStatusLabel[status]}</small></div>
+                      <div className={styles.simpleReorderActions}>
+                        <button type="button" aria-label={"\uCEF7 " + (index + 1) + " \uC55E\uC73C\uB85C \uC774\uB3D9"} onClick={() => moveSimpleStoryboardCut(card.id, -1)} disabled={index === 0}><ChevronLeft size={15} /></button>
+                        <button type="button" aria-label={"\uCEF7 " + (index + 1) + " \uB4A4\uB85C \uC774\uB3D9"} onClick={() => moveSimpleStoryboardCut(card.id, 1)} disabled={index === simpleStoryboardCards.length - 1}><ChevronRight size={15} /></button>
+                        <button type="button" aria-label={"\uCEF7 " + (index + 1) + " \uC0AD\uC81C"} onClick={() => removeSimpleStoryboardCut(card.id)} disabled={isGenerationCardBusy(card)}><Trash2 size={15} /></button>
+                      </div>
+                    </header>
+                    <label className={styles.simpleField}>
+                      <span>{"\uC7A5\uBA74 \uC124\uBA85"}</span>
+                      <textarea rows={4} value={card.prompt} maxLength={40000} placeholder={"\uC774 \uCEF7\uC5D0 \uBCF4\uC5EC\uC904 \uC7A5\uBA74\uC744 \uC368 \uC8FC\uC138\uC694."} onChange={(event) => updateGenerationCard(card.id, (current) => ({ ...current, prompt: event.target.value, error: null }))} />
+                    </label>
+                  </article>
+                );
+              })}
+              <button type="button" className={styles.simpleAddCut} onClick={addSimpleStoryboardCut} disabled={simpleProject.storyboardCardIds.length >= GENERATION_CARD_LIMIT}><Plus size={16} /> {"\uCEF7 \uCD94\uAC00"}</button>
+            </div>
+          )}
+          {simpleActionError && <p className={styles.simpleError} role="alert"><AlertTriangle size={15} /> {simpleActionError}</p>}
+        </section>
+      );
+    }
+
+    if (simpleProject.step === 4) {
+      return (
+        <section className={styles.simpleStepPanel} aria-labelledby="simple-step-heading">
+          <div className={styles.simpleStepHeader}>
+            <span>STEP 4</span>
+            <h2 id="simple-step-heading" ref={simpleStepHeadingRef} tabIndex={-1}>{"\uCEF7\uBCC4 \uC774\uBBF8\uC9C0\uC640 \uC601\uC0C1"}</h2>
+            <p>{"\uC2DC\uC791 \uC774\uBBF8\uC9C0\uB97C \uC120\uD0DD\uD558\uACE0, \uC900\uBE44\uB41C \uCEF7\uBD80\uD130 \uC601\uC0C1\uC73C\uB85C \uB9CC\uB4ED\uB2C8\uB2E4."}</p>
+          </div>
+          <input
+            ref={simpleCutImageInputRef}
+            className={styles.hiddenInput}
+            type="file"
+            accept="image/png,.png"
+            onChange={(event) => {
+              const cardId = simpleCutImageTargetRef.current;
+              const file = event.target.files?.[0];
+              simpleCutImageTargetRef.current = null;
+              if (cardId && file) void uploadGenerationReferenceImage(cardId, file);
+              event.currentTarget.value = "";
+            }}
+          />
+          {!capabilities?.imageGeneration && <p className={styles.simpleNotice}><ImageIcon size={15} /> {"\uC774\uBBF8\uC9C0 \uC790\uB3D9 \uC0DD\uC131\uC740 \uC5F0\uACB0\uB418\uC5B4 \uC788\uC9C0 \uC54A\uC544 PNG \uC5C5\uB85C\uB4DC\uB9CC \uC81C\uACF5\uD569\uB2C8\uB2E4."}</p>}
+          {capabilityError && <p className={styles.simpleError} role="alert"><AlertTriangle size={15} /> {capabilityError}</p>}
+          {capabilities && !capabilities.videoGeneration && <p className={styles.simpleError}><AlertTriangle size={15} /> {"\uD604\uC7AC \uD658\uACBD\uC5D0 \uC601\uC0C1 \uC0DD\uC131 \uC5F0\uACB0 \uC815\uBCF4\uAC00 \uC5C6\uC5B4 \uC0DD\uC131 \uBC84\uD2BC\uC744 \uC0AC\uC6A9\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4."}</p>}
+          {simpleStoryboardCards.length === 0 ? (
+            <div className={styles.simpleEmptyState}><span><Film size={30} /></span><strong>{"\uBA3C\uC800 \uC2A4\uD1A0\uB9AC\uBCF4\uB4DC \uCEF7\uC744 \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694."}</strong><button type="button" className={styles.simpleSecondaryButton} onClick={() => changeSimpleStep(3)}>{"\uC2A4\uD1A0\uB9AC\uBCF4\uB4DC\uB85C \uC774\uB3D9"}</button></div>
+          ) : (
+            <div className={styles.simpleGenerationList}>
+              {simpleStoryboardCards.map((card, index) => {
+                const status = getSimpleCutStatus(card, shouldUseSharedCharacter(card));
+                const busy = isGenerationCardBusy(card);
+                const cardClip = clips.find((clip) => clip.generationCardId === card.id);
+                const referenceError = getEffectiveReferenceError(card);
+                const firstReferenceMedia = card.referenceMedia[0] ?? null;
+                const previewAsset = card.referenceImage
+                  ?? (firstReferenceMedia?.kind === "image" ? firstReferenceMedia.asset : null)
+                  ?? (!firstReferenceMedia && shouldUseSharedCharacter(card) ? simpleProject.characterAsset : null);
+                const previewVideo = firstReferenceMedia?.kind === "video" ? firstReferenceMedia.asset : null;
+                return (
+                  <article className={styles.simpleGenerationCard} key={card.id}>
+                    <div className={styles.simpleGenerationPreview}>
+                      {cardClip ? <video src={cardClip.asset.sourceUrl} controls playsInline preload="metadata" /> : previewAsset ? <img src={previewAsset.sourceUrl} alt={"\uCEF7 " + (index + 1) + " \uC774\uBBF8\uC9C0"} /> : previewVideo ? <video src={previewVideo.sourceUrl} controls muted playsInline preload="metadata" /> : <span><ImageIcon size={26} /> {"PNG \uCD94\uAC00"}</span>}
+                    </div>
+                    <div className={styles.simpleGenerationBody}>
+                      <header><div><strong>{"\uCEF7 "}{index + 1}{card.storyboardRole ? " \u00B7 " + simpleStoryboardRoleLabels[card.storyboardRole] : ""}</strong><small className={styles.simpleStatus} data-status={status} role="status" aria-live="polite">{simpleCutStatusLabel[status]}</small></div><span>{card.duration}{"\uCD08 \u00B7 "}{card.resolution}</span></header>
+                      <p>{card.prompt || "\uC7A5\uBA74 \uC124\uBA85\uC744 \uC785\uB825\uD574 \uC8FC\uC138\uC694."}</p>
+                      {shouldUseSharedCharacter(card) && <small className={styles.simpleSharedReference}><CheckCircle2 size={13} /> {"\uACF5\uD1B5 \uCE90\uB9AD\uD130 \uB808\uD37C\uB7F0\uC2A4\uB97C \uD568\uAED8 \uC0AC\uC6A9\uD569\uB2C8\uB2E4."}</small>}
+                      {simpleProject.characterAsset && card.referenceImage && <small className={styles.simpleConstraint}><AlertTriangle size={13} /> {"\uD604\uC7AC \uC601\uC0C1 \uC0DD\uC131 \uC5F0\uACB0\uC740 \uC2DC\uC791 \uC774\uBBF8\uC9C0\uC640 \uACF5\uD1B5 \uB808\uD37C\uB7F0\uC2A4\uB97C \uD568\uAED8 \uBCF4\uB0BC \uC218 \uC5C6\uC5B4 \uC774 \uCEF7\uC740 \uC2DC\uC791 \uC774\uBBF8\uC9C0\uB97C \uC6B0\uC120\uD569\uB2C8\uB2E4."}</small>}
+                      {simpleProject.characterAsset && card.model === "seedance-2-pro" && !card.referenceImage && <small className={styles.simpleConstraint}><AlertTriangle size={13} /> {"\uACF5\uD1B5 \uCE90\uB9AD\uD130 \uB808\uD37C\uB7F0\uC2A4\uB294 Seedance 2.5 Pro \uCEF7\uC5D0\uC11C\uB9CC \uC804\uB2EC\uB429\uB2C8\uB2E4."}</small>}
+                      {card.referenceMedia.length > 0 && <small className={styles.simpleSharedReference}><Layers3 size={13} /> {"\uC804\uBB38\uAC00\uC6A9\uC5D0\uC11C \uC5F0\uACB0\uD55C \uB808\uD37C\uB7F0\uC2A4 \uBBF8\uB514\uC5B4 "}{card.referenceMedia.length}{"\uAC1C\uB97C \uC0AC\uC6A9\uD569\uB2C8\uB2E4."}</small>}
+                      <div className={styles.simpleGenerationActions}>
+                        {card.referenceMedia.length > 0 ? (
+                          <button type="button" onClick={() => { chooseStudioMode("expert"); setWorkspaceView("work"); setActiveEditorMode("generate"); }}><Settings2 size={14} /> {"\uC804\uBB38\uAC00\uC6A9\uC5D0\uC11C \uB808\uD37C\uB7F0\uC2A4 \uAD00\uB9AC"}</button>
+                        ) : (
+                          <button type="button" onClick={() => { simpleCutImageTargetRef.current = card.id; simpleCutImageInputRef.current?.click(); }} disabled={busy || !simpleUploadsAvailable}><ImageIcon size={14} /> {card.referenceImage ? "\uC774\uBBF8\uC9C0 \uAD50\uCCB4" : "\uC2DC\uC791 PNG \uCD94\uAC00"}</button>
+                        )}
+                        {card.referenceImage && <button type="button" onClick={() => updateGenerationCard(card.id, (current) => ({ ...current, referenceImage: null, referenceImageError: null }))} disabled={busy}><Trash2 size={14} /> {"\uC774\uBBF8\uC9C0 \uC81C\uAC70"}</button>}
+                        <button type="button" className={styles.simplePrimaryButton} onClick={() => void startGenerationForCard(card.id)} disabled={!capabilities?.videoGeneration || busy || !card.prompt.trim() || Boolean(referenceError)}>
+                          {busy ? <LoaderCircle className={styles.spin} size={14} /> : card.job?.status === "completed" || card.job?.status === "failed" ? <RefreshCw size={14} /> : <Sparkles size={14} />}
+                          {busy ? "\uC0DD\uC131 \uC911" : card.job?.status === "completed" || card.job?.status === "failed" ? "\uB2E4\uC2DC \uC0DD\uC131" : "\uC601\uC0C1 \uC0DD\uC131"}
+                        </button>
+                      </div>
+                      {(card.referenceImageError || card.error || card.job?.error || referenceError) && <p className={styles.simpleError} role="alert"><AlertTriangle size={14} /> {card.referenceImageError || card.error || card.job?.error || referenceError}</p>}
+                    </div>
+                  </article>
+                );
+              })}
+              <div className={styles.simpleBatchBar}>
+                <span><CheckCircle2 size={15} /> {simpleGeneratedClipCount}{"/"}{simpleStoryboardCards.length}{"\uAC1C \uCEF7 \uC900\uBE44"}</span>
+                <button type="button" className={styles.simplePrimaryButton} onClick={() => void startSimpleGeneration()} disabled={!simpleCanGenerateAll || generationBatchSubmitting}>
+                  {generationBatchSubmitting ? <LoaderCircle className={styles.spin} size={15} /> : <Sparkles size={15} />}
+                  {generationBatchSubmitting ? "\uC694\uCCAD \uC911" : "\uC900\uBE44\uB41C \uC804\uCCB4 \uCEF7 \uC0DD\uC131"}
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
+      );
+    }
+
+    return (
+      <section className={styles.simpleStepPanel} aria-labelledby="simple-step-heading">
+        <div className={styles.simpleStepHeader}>
+          <span>STEP 5</span>
+          <h2 id="simple-step-heading" ref={simpleStepHeadingRef} tabIndex={-1}>{"\uCE74\uD53C\uC640 \uBBF8\uB9AC\uBCF4\uAE30"}</h2>
+          <p>{"\uAC19\uC740 \uCEF7, \uC790\uB9C9\u00B7PNG, \uBAA8\uC158 \uB370\uC774\uD130\uB97C \uC804\uBB38\uAC00\uC6A9 \uD3B8\uC9D1\uAE30\uC640 \uACF5\uC720\uD569\uB2C8\uB2E4."}</p>
+        </div>
+        <div className={styles.simplePreviewLayout}>
+          <div className={styles.simpleCopyPanel}>
+            <label className={styles.simpleField}>
+              <span>{"\uD654\uBA74\uC5D0 \uD45C\uC2DC\uD560 \uCE74\uD53C"}</span>
+              <textarea rows={4} value={simpleProject.copyText} maxLength={180} placeholder={simpleProject.cta || "\uC608: \uC9C0\uAE08 \uD50C\uB808\uC774"} onChange={(event) => setSimpleProject((current) => ({ ...current, copyText: event.target.value }))} />
+            </label>
+            <fieldset className={styles.simpleMotionFieldset}>
+              <legend>{"\uAE30\uBCF8 \uBAA8\uC158"}</legend>
+              <div>{motions.map((motion) => <button type="button" key={motion.value} className={simpleProject.copyMotion === motion.value ? styles.simpleMotionActive : ""} aria-pressed={simpleProject.copyMotion === motion.value} onClick={() => setSimpleProject((current) => ({ ...current, copyMotion: motion.value }))}>{motion.label}</button>)}</div>
+            </fieldset>
+            <button type="button" className={styles.simplePrimaryButton} onClick={applySimpleCopy} disabled={!clips.length || (!simpleCopyItemExists && items.length >= 20)}><Type size={15} /> {simpleCopyItemExists ? "\uCE74\uD53C \uC5C5\uB370\uC774\uD2B8" : "\uCE74\uD53C \uBBF8\uB9AC\uBCF4\uAE30\uC5D0 \uC801\uC6A9"}</button>
+            <input ref={graphicInputRef} className={styles.hiddenInput} type="file" accept="image/png,.png" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadGraphic(file); event.currentTarget.value = ""; }} />
+            <button type="button" className={styles.simpleSecondaryButton} onClick={() => graphicInputRef.current?.click()} disabled={!clips.length || graphicUploading || graphics.length >= 10}>{graphicUploading ? <LoaderCircle className={styles.spin} size={15} /> : <ImageIcon size={15} />} {"PNG \uCE74\uD53C \uCD94\uAC00"}</button>
+            <div className={styles.simpleLayerSummary}>
+              <span><Type size={14} /> {items.length}{"\uAC1C \uC790\uB9C9"}</span>
+              <span><ImageIcon size={14} /> {graphics.length}{"\uAC1C PNG"}</span>
+            </div>
+            <button type="button" className={styles.simpleExpertLink} onClick={() => { chooseStudioMode("expert"); setWorkspaceView("work"); setActiveEditorMode("captions"); }}><Settings2 size={15} /> {"\uC804\uBB38\uAC00\uC6A9\uC5D0\uC11C \uC704\uCE58\u00B7\uD06C\uAE30\u00B7\uC2DC\uAC04 \uC870\uC815"}<ChevronRight size={15} /></button>
+          </div>
+          <div className={styles.simplePreviewPanel}>
+            <div className={styles.simplePreviewHeading}><span><MonitorPlay size={15} /> {"\uACB0\uACFC \uBBF8\uB9AC\uBCF4\uAE30"}</span><small>{outputDimensions.width}{" \u00D7 "}{outputDimensions.height}{" \u00B7 "}{previewFps}{"fps"}</small></div>
+            <div className={styles.simplePlayerShell} style={{ aspectRatio: outputDimensions.width + " / " + outputDimensions.height }}>
+              {clips.length ? (
+                <Player
+                  ref={playerRef}
+                  key={"simple-" + sequencePlayerKey}
+                  component={VideoAdSequenceComposition}
+                  inputProps={previewInputProps}
+                  durationInFrames={sequenceDurationInFrames}
+                  compositionWidth={outputDimensions.width}
+                  compositionHeight={outputDimensions.height}
+                  fps={previewFps}
+                  controls
+                  loop={false}
+                  moveToBeginningWhenEnded={false}
+                  style={{ width: "100%", height: "100%" }}
+                />
+              ) : (
+                <div className={styles.simplePreviewEmpty}><MonitorPlay size={30} /><strong>{"\uC544\uC9C1 \uBBF8\uB9AC\uBCF4\uAE30\uD560 \uC601\uC0C1\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."}</strong><span>{"\uC644\uC131\uB41C \uCEF7\uC774 \uC788\uAC70\uB098 \uC804\uBB38\uAC00\uC6A9\uC5D0\uC11C MP4\uB97C \uCD94\uAC00\uD558\uBA74 \uC5EC\uAE30\uC5D0 \uD45C\uC2DC\uB429\uB2C8\uB2E4."}</span></div>
+              )}
+            </div>
+            {simpleActionError && <p className={styles.simpleError} role="alert"><AlertTriangle size={15} /> {simpleActionError}</p>}
+            {graphicError && <p className={styles.simpleError} role="alert"><AlertTriangle size={15} /> {graphicError}</p>}
+            <div className={styles.simpleRenderActions}>
+              {job?.status === "completed" && job.downloadUrl ? (
+                <a className={styles.simplePrimaryButton} href={job.downloadUrl}><Download size={16} /> {"\uC644\uC131 MP4 \uB2E4\uC6B4\uB85C\uB4DC"}</a>
+              ) : (
+                <button type="button" className={styles.simplePrimaryButton} disabled={!asset || activeJob || editorErrors.length > 0} onClick={() => void startRender()}>{activeJob ? <LoaderCircle className={styles.spin} size={16} /> : <Film size={16} />} {activeJob ? "\uB80C\uB354\uB9C1 \uC911" : job?.status === "failed" ? "\uB2E4\uC2DC \uB80C\uB354\uB9C1" : "\uCD5C\uC885 \uC601\uC0C1 \uB80C\uB354\uB9C1"}</button>
+              )}
+              <button type="button" className={styles.simpleSecondaryButton} onClick={() => { chooseStudioMode("expert"); setWorkspaceView("edit"); }}><Settings2 size={15} /> {"\uC804\uBB38\uAC00\uC6A9\uC73C\uB85C \uC5F4\uAE30"}</button>
+            </div>
+            {renderError && <p className={styles.simpleError} role="alert"><AlertTriangle size={15} /> {renderError}</p>}
+          </div>
+        </div>
+      </section>
+    );
+  };
+
+  const simpleCanContinue = simpleProject.step === 1
+    || (simpleProject.step === 2 && Boolean(simpleProject.subject.trim()))
+    || (simpleProject.step === 3 && simpleStoryboardCards.length > 0 && simpleStoryboardCards.every((card) => Boolean(card.prompt.trim())))
+    || simpleProject.step >= 4;
+
   return (
     <main className={styles.page}>
       <header className={styles.header}>
@@ -1424,33 +2300,124 @@ export function VideoAdEditor() {
           <h1>게임 광고 영상 스튜디오</h1>
         </div>
         <div className={styles.headerActions}>
-          <span className={styles.saveStatus}><CheckCircle2 size={14} /> 미리보기 자동 반영</span>
-          <button
-            type="button"
-            className={styles.headerButton}
-            onClick={() => {
-              setWorkspaceView("edit");
-              requestAnimationFrame(() => previewSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }));
-            }}
-          >
-            <MonitorPlay size={16} /> 미리보기
-          </button>
-          <button
-            type="button"
-            className={styles.headerPrimary}
-            disabled={!asset || activeJob || editorErrors.length > 0}
-            onClick={() => {
-              setWorkspaceView("edit");
-              void startRender();
-            }}
-          >
-            {activeJob ? <LoaderCircle className={styles.spin} size={16} /> : <Film size={16} />}
-            전체 영상 내보내기
-          </button>
+          {studioMode !== null && (
+            <button type="button" className={styles.headerButton} onClick={() => chooseStudioMode(null)}>
+              <Layers3 size={16} /> {"\uBAA8\uB4DC \uC120\uD0DD"}
+            </button>
+          )}
+          {studioMode === "expert" && (
+            <>
+              <span className={[styles.saveStatus, projectSaveError ? styles.saveStatusError : ""].filter(Boolean).join(" ")} title={projectSaveError ?? undefined}>{projectSaveError ? <AlertTriangle size={14} /> : <CheckCircle2 size={14} />} {projectSaveError ? "\uC800\uC7A5 \uD655\uC778 \uD544\uC694" : "\uC774 \uBE0C\uB77C\uC6B0\uC800\uC5D0 \uC790\uB3D9 \uC800\uC7A5"}</span>
+              <button
+                type="button"
+                className={styles.headerButton}
+                onClick={() => {
+                  setWorkspaceView("edit");
+                  requestAnimationFrame(() => previewSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }));
+                }}
+              >
+                <MonitorPlay size={16} /> {"\uBBF8\uB9AC\uBCF4\uAE30"}
+              </button>
+              <button
+                type="button"
+                className={styles.headerPrimary}
+                disabled={!asset || activeJob || editorErrors.length > 0}
+                onClick={() => {
+                  setWorkspaceView("edit");
+                  void startRender();
+                }}
+              >
+                {activeJob ? <LoaderCircle className={styles.spin} size={16} /> : <Film size={16} />}
+                {"\uC804\uCCB4 \uC601\uC0C1 \uB0B4\uBCF4\uB0B4\uAE30"}
+              </button>
+            </>
+          )}
+          {studioMode === "simple" && (
+            <>
+              <span className={[styles.saveStatus, projectSaveError ? styles.saveStatusError : ""].filter(Boolean).join(" ")} title={projectSaveError ?? undefined}>{projectSaveError ? <AlertTriangle size={14} /> : <CheckCircle2 size={14} />} {projectSaveError ? "\uC800\uC7A5 \uD655\uC778 \uD544\uC694" : "\uC791\uC5C5 \uC790\uB3D9 \uC800\uC7A5"}</span>
+              <button type="button" className={styles.headerPrimary} onClick={() => { chooseStudioMode("expert"); setWorkspaceView("work"); }}>
+                <Settings2 size={16} /> {"\uC804\uBB38\uAC00\uC6A9\uC73C\uB85C \uC5F4\uAE30"}
+              </button>
+            </>
+          )}
         </div>
       </header>
 
+      {!projectStateReady && (
+        <section className={styles.studioLoading} aria-live="polite">
+          <LoaderCircle className={styles.spin} size={24} />
+          <strong>{"\uC800\uC7A5\uB41C \uD504\uB85C\uC81D\uD2B8\uB97C \uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4."}</strong>
+        </section>
+      )}
+
+      {projectStateReady && studioMode === null && (
+        <section className={styles.modeChooser} aria-labelledby="studio-mode-title">
+          <div className={styles.modeChooserIntro}>
+            <span>{"GAME AD WORKSPACE"}</span>
+            <h2 id="studio-mode-title">{"\uC5B4\uB5BB\uAC8C \uC2DC\uC791\uD560\uAE4C\uC694?"}</h2>
+            <p>{"\uAC19\uC740 \uD504\uB85C\uC81D\uD2B8\uB97C \uB450 \uAC00\uC9C0 \uBC29\uC2DD\uC73C\uB85C \uD3B8\uC9D1\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uBAA8\uB4DC\uB97C \uBC14\uAFB8\uC5B4\uB3C4 \uCEF7\uACFC \uC5D0\uC14B\uC740 \uADF8\uB300\uB85C \uC720\uC9C0\uB429\uB2C8\uB2E4."}</p>
+          </div>
+          <div className={styles.modeGrid}>
+            <button type="button" className={styles.modeCard} onClick={() => chooseStudioMode("simple")}>
+              <span className={styles.modeCardIcon}><Sparkles size={24} /></span>
+              <span><small>{"GUIDED"}</small><strong>{"\uAC04\uD3B8 \uC81C\uC791"}</strong><em>{"\uCE90\uB9AD\uD130\uC640 \uAD11\uACE0 \uB0B4\uC6A9\uC744 \uC785\uB825\uD558\uBA74 \uAC04\uB2E8\uD55C \uC2A4\uD1A0\uB9AC\uBCF4\uB4DC\uBD80\uD130 \uBE60\uB974\uAC8C \uC2DC\uC791\uD569\uB2C8\uB2E4."}</em></span>
+              <span className={styles.modeCardTags}><b>{"5\uB2E8\uACC4 \uC548\uB0B4"}</b><b>{"3\uCEF7 \uAE30\uBCF8 \uD2C0"}</b></span>
+              <ChevronRight size={20} />
+            </button>
+            <button type="button" className={styles.modeCard} onClick={() => chooseStudioMode("expert")}>
+              <span className={styles.modeCardIcon}><Settings2 size={24} /></span>
+              <span><small>{"ADVANCED"}</small><strong>{"\uC804\uBB38\uAC00\uC6A9"}</strong><em>{"\uCEF7\uBCC4 \uD504\uB86C\uD504\uD2B8, \uB808\uD37C\uB7F0\uC2A4, \uC601\uC0C1 \uC124\uC815\uACFC \uD0C0\uC784\uB77C\uC778\uC744 \uC9C1\uC811 \uC870\uC815\uD569\uB2C8\uB2E4."}</em></span>
+              <span className={styles.modeCardTags}><b>{"\uCEF7\uBCC4 \uC124\uC815"}</b><b>{"\uD0C0\uC784\uB77C\uC778"}</b></span>
+              <ChevronRight size={20} />
+            </button>
+          </div>
+          <p className={[styles.modeChooserNote, projectSaveError ? styles.saveStatusError : ""].filter(Boolean).join(" ")}>{projectSaveError ? <AlertTriangle size={15} /> : <CheckCircle2 size={15} />} {projectSaveError ?? "\uD604\uC7AC \uD504\uB85C\uC81D\uD2B8\uB294 \uC774 \uBE0C\uB77C\uC6B0\uC800\uC5D0\uB9CC \uC800\uC7A5\uB418\uBA70, \uB2E4\uB978 \uAE30\uAE30\uC640 \uC790\uB3D9 \uB3D9\uAE30\uD654\uB418\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4."}</p>
+        </section>
+      )}
+
+      {projectStateReady && studioMode === "simple" && (
+        <div className={styles.simpleWorkspace}>
+          <div className={styles.simpleTopbar}>
+            <div><span>{"\uAC04\uD3B8 \uC81C\uC791"}</span><strong>{"\uD544\uC694\uD55C \uB0B4\uC6A9\uB9CC \uC21C\uC11C\uB300\uB85C \uC785\uB825\uD558\uC138\uC694."}</strong></div>
+            <small>{projectSaveError ? <AlertTriangle size={14} /> : <CheckCircle2 size={14} />} {projectSaveError ? "\uC800\uC7A5 \uD655\uC778 \uD544\uC694" : "\uC774 \uBE0C\uB77C\uC6B0\uC800\uC5D0 \uC790\uB3D9 \uC800\uC7A5"}</small>
+          </div>
+          {projectSaveError && <p className={styles.simpleError} role="alert"><AlertTriangle size={15} /> {projectSaveError}</p>}
+          <ol className={styles.simpleStepper} aria-label={"\uAC04\uD3B8 \uC81C\uC791 \uB2E8\uACC4"}>
+            {simpleStepLabels.map(({ step, label }) => {
+              const canOpen = step <= simpleProject.step || (step === simpleProject.step + 1 && simpleCanContinue);
+              return (
+                <li key={step} data-simple-step={step} className={step === simpleProject.step ? styles.simpleStepCurrent : step < simpleProject.step ? styles.simpleStepDone : ""}>
+                  <button type="button" disabled={!canOpen} aria-current={step === simpleProject.step ? "step" : undefined} onClick={() => changeSimpleStep(step)}>
+                    <span>{step < simpleProject.step ? <Check size={14} /> : step}</span>
+                    <strong>{label}</strong>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+
+          {renderSimpleStep()}
+
+          <footer className={styles.simpleFooter}>
+            <button type="button" className={styles.simpleSecondaryButton} onClick={() => simpleProject.step === 1 ? chooseStudioMode(null) : changeSimpleStep((simpleProject.step - 1) as SimpleStep)}>
+              <ChevronLeft size={16} /> {simpleProject.step === 1 ? "\uBAA8\uB4DC \uC120\uD0DD" : "\uC774\uC804 \uB2E8\uACC4"}
+            </button>
+            {simpleProject.step < 5 ? (
+              <button type="button" className={styles.simplePrimaryButton} disabled={!simpleCanContinue} onClick={() => changeSimpleStep((simpleProject.step + 1) as SimpleStep)}>
+                {simpleProject.step === 2 && simpleStoryboardCards.length === 0 ? "\uC2A4\uD1A0\uB9AC\uBCF4\uB4DC\uB85C \uC774\uB3D9" : "\uB2E4\uC74C \uB2E8\uACC4"} <ChevronRight size={16} />
+              </button>
+            ) : (
+              <button type="button" className={styles.simplePrimaryButton} onClick={() => { chooseStudioMode("expert"); setWorkspaceView("edit"); }}>
+                <Settings2 size={16} /> {"\uC804\uBB38\uAC00\uC6A9\uC73C\uB85C \uACC4\uC18D"}
+              </button>
+            )}
+          </footer>
+        </div>
+      )}
+
+      {projectStateReady && studioMode === "expert" && (
       <div className={styles.workspace}>
+        {projectSaveError && <p className={styles.projectSaveBanner} role="alert"><AlertTriangle size={15} /> {projectSaveError}</p>}
         <nav className={styles.workspaceSectionNav} aria-label={"\uC791\uC5C5\uACF5\uAC04 \uC120\uD0DD"}>
           <button
             type="button"
@@ -1580,6 +2547,12 @@ export function VideoAdEditor() {
 
               {!generationCardsReady ? (
                 <div className={styles.generationQueueEmpty}><LoaderCircle className={styles.spin} size={14} /> {"\uCEF7 \uC791\uC5C5 \uD654\uBA74\uC744 \uC900\uBE44\uD558\uACE0 \uC788\uC2B5\uB2C8\uB2E4."}</div>
+              ) : generationCards.length === 0 ? (
+                <div className={[styles.generationQueueEmpty, styles.generationQueueEmptyStart].join(" ")}>
+                  <span className={styles.generationQueueEmptyIcon}><Film size={20} /></span>
+                  <span><strong>{"\uC544\uC9C1 \uC791\uC131\uD55C \uCEF7\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."}</strong><small>{"\uCEF7 \uCD94\uAC00\uB85C \uCCAB \uC7A5\uBA74\uC758 \uC124\uC815\uC744 \uC2DC\uC791\uD558\uC138\uC694."}</small></span>
+                  <button type="button" className={styles.generationAddButton} onClick={addGenerationCard}><Plus size={13} /> {"\uCCAB \uCEF7 \uCD94\uAC00"}</button>
+                </div>
               ) : (
                 <div className={styles.generationQueue}>
                   {generationCards.map((card, index) => {
@@ -1649,6 +2622,23 @@ export function VideoAdEditor() {
                                 );
                               })}
                             </div>
+
+                            {simpleProject.characterAsset && simpleProject.storyboardCardIds.includes(card.id) && (
+                              <div className={styles.sharedCharacterReference}>
+                                <img src={simpleProject.characterAsset.sourceUrl} alt={"\uACF5\uD1B5 \uCE90\uB9AD\uD130 \uB808\uD37C\uB7F0\uC2A4"} />
+                                <div>
+                                  <strong>{"\uACF5\uD1B5 \uCE90\uB9AD\uD130 \uB808\uD37C\uB7F0\uC2A4"}</strong>
+                                  <span>{card.model !== "seedance-2-5-pro"
+                                    ? "Seedance 2.5 Pro\uC5D0\uC11C\uB9CC \uC0DD\uC131 \uC694\uCCAD\uC5D0 \uD3EC\uD568\uB429\uB2C8\uB2E4."
+                                    : card.referenceImage
+                                      ? "\uC774 \uCEF7\uC740 \uC2DC\uC791 \uC774\uBBF8\uC9C0\uB97C \uC6B0\uC120\uD574 \uACF5\uD1B5 \uB808\uD37C\uB7F0\uC2A4\uB97C \uC0DD\uC131 \uC694\uCCAD\uC5D0 \uD3EC\uD568\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4."
+                                      : "\uAC04\uD3B8 \uC81C\uC791\uC5D0\uC11C \uC5F0\uACB0\uB418\uC5B4 \uC774 \uCEF7\uC758 \uC0DD\uC131 \uC694\uCCAD\uC5D0 \uD568\uAED8 \uD3EC\uD568\uB429\uB2C8\uB2E4."}</span>
+                                </div>
+                                <button type="button" onClick={() => { setSimpleProject((current) => ({ ...current, step: 1 })); chooseStudioMode("simple"); }}>
+                                  {"\uAC04\uD3B8 \uC81C\uC791\uC5D0\uC11C \uAD00\uB9AC"}<ChevronRight size={13} />
+                                </button>
+                              </div>
+                            )}
 
                             <div className={styles.referenceImage}>
                               <div className={styles.referenceImageMeta}>
@@ -1786,7 +2776,7 @@ export function VideoAdEditor() {
                   })}
                 </div>
               )}
-              <p className={styles.aiHint}>{"\uAC01 \uC0DD\uC131 \uC694\uCCAD\uC740 Magnific API \uD06C\uB808\uB527\uC744 \uC0AC\uC6A9\uD558\uBA70, \uACB0\uACFC \uC601\uC0C1\uC740 \uC791\uC5C5 \uC21C\uC11C\uB300\uB85C \uD0C0\uC784\uB77C\uC778\uC5D0 \uC5F0\uACB0\uB429\uB2C8\uB2E4."}</p>
+              <p className={styles.aiHint}>{"\uC601\uC0C1 \uC0DD\uC131\uC740 \uC5F0\uACB0\uB41C \uC0DD\uC131 \uC11C\uBE44\uC2A4 \uC0AC\uC6A9\uB7C9\uC5D0 \uBC18\uC601\uB420 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uC694\uCCAD \uC804 \uCEF7 \uC124\uC815\uC744 \uD655\uC778\uD574 \uC8FC\uC138\uC694."}</p>
             </div>
           </div>
           <div
@@ -1851,7 +2841,7 @@ export function VideoAdEditor() {
                   <article className={`${styles.textCard} ${errors.length ? styles.invalid : ""}`} key={item.id}>
                     <div className={styles.textCardHeader}>
                       <strong>문구 {index + 1}</strong>
-                      <button type="button" className={styles.iconButton} aria-label={`문구 ${index + 1} 삭제`} onClick={() => setItems((current) => current.filter((entry) => entry.id !== item.id))}>
+                      <button type="button" className={styles.iconButton} aria-label={`문구 ${index + 1} 삭제`} onClick={() => { setItems((current) => current.filter((entry) => entry.id !== item.id)); setSimpleProject((current) => current.copyItemId === item.id ? { ...current, copyItemId: null } : current); }}>
                         <Trash2 size={17} />
                       </button>
                     </div>
@@ -2298,7 +3288,7 @@ export function VideoAdEditor() {
                   const dimensions = OUTPUT_RATIOS[ratio];
                   return (
                     <label key={ratio} className={outputRatio === ratio ? styles.selected : ""}>
-                      <input type="radio" name="ratio" value={ratio} checked={outputRatio === ratio} onChange={() => setOutputRatio(ratio)} />
+                      <input type="radio" name="ratio" value={ratio} checked={outputRatio === ratio} onChange={() => updateProjectOutputRatio(ratio)} />
                       <span className={styles.ratioIcon} style={{ aspectRatio: `${dimensions.width} / ${dimensions.height}` }} />
                       <strong>{ratio}</strong>
                       {outputRatio === ratio && <Check className={styles.ratioCheck} size={12} />}
@@ -2339,7 +3329,7 @@ export function VideoAdEditor() {
                     {typeof job.progress === "number" && <span>{Math.round(job.progress * 100)}%</span>}
                   </div>
                   {job.error && <p>{job.error}</p>}
-                  {(job.status === "queued" || job.status === "rendering") && <small>작업 ID {job.id.slice(0, 8)} · 시작 시점의 설정으로 렌더링합니다.</small>}
+                  {(job.status === "queued" || job.status === "rendering") && <small>{"\uC2DC\uC791 \uC2DC\uC810\uC758 \uC124\uC815\uC73C\uB85C \uB80C\uB354\uB9C1\uD558\uACE0 \uC788\uC2B5\uB2C8\uB2E4."}</small>}
                 </div>
               )}
 
@@ -2354,12 +3344,13 @@ export function VideoAdEditor() {
               {job?.status === "completed" && (
                 <button type="button" className={styles.secondaryButton} onClick={() => void startRender()} disabled={!asset || editorErrors.length > 0}>현재 설정으로 새 영상 만들기</button>
               )}
-              <p className={styles.workerHint}>렌더 워커가 켜져 있어야 대기 작업이 처리됩니다: <code>pnpm worker</code></p>
+
             </details>
           </div>
         </aside>
         </section>
       </div>
+      )}
     </main>
   );
 }

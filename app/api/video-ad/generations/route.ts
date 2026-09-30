@@ -40,6 +40,16 @@ const isReferenceMediaInput = (value: unknown): value is ReferenceMediaInput => 
 
 const isSafeId = (value: string) => /^[0-9a-f-]{36}$/i.test(value);
 
+export async function GET() {
+  return NextResponse.json({
+    videoGeneration: Boolean(process.env.MAGNIFIC_API_KEY?.trim()),
+    storyboardGeneration: false,
+    imageGeneration: false,
+    cloudUploads: Boolean(
+      process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() && process.env.SUPABASE_SECRET_KEY?.trim(),
+    ),
+  });
+}
 export async function POST(request: Request) {
   try {
     const body = await request.json() as Record<string, unknown>;

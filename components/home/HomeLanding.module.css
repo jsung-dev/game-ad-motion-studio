@@ -1376,3 +1376,41 @@
     margin-top: 18px;
   }
 }
+/* Let the showcase video occupy the cinematic console instead of a nested frame. */
+.previewBody {
+  min-height: 0;
+}
+
+.previewCanvas {
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 18px;
+}
+
+.showcaseStage {
+  width: 100%;
+  max-width: none;
+  border: 0;
+  border-radius: 9px;
+  background: #060910;
+  box-shadow: none;
+}
+
+.showcaseStage::before {
+  display: none;
+}
+
+.timeline {
+  width: 100%;
+}
+
+@media (max-width: 560px) {
+  .previewCanvas {
+    gap: 10px;
+    padding: 12px 10px;
+  }
+
+  .showcaseStage {
+    border-radius: 7px;
+  }
+}

@@ -21,6 +21,25 @@
 }
 .brand, .headerActions, .sectionTitle, .sectionTitleRow, .panelHeader { display: flex; align-items: center; }
 .brand { gap: 10px; }
+.homeButton {
+  height: 32px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border: 1px solid #343a4a;
+  border-radius: 9px;
+  padding: 0 8px;
+  background: #151924;
+  color: #c9cfdd;
+  font-size: 10px;
+  font-weight: 750;
+  text-decoration: none;
+  transition: transform .16s ease, border-color .16s ease, background .16s ease, color .16s ease;
+}
+.homeButton:hover { border-color: #6557ab; background: #211d35; color: #f0edff; transform: translateY(-1px); }
+.homeButton:focus-visible { outline: 2px solid #9b87ff; outline-offset: 2px; }
 .brandMark, .panelIcon {
   display: grid;
   place-items: center;
@@ -1154,6 +1173,7 @@
   .page { min-height: 100vh; }
   .header { position: sticky; height: 58px; grid-template-columns: 1fr auto; gap: 8px; padding: 0 10px; }
   .brand { gap: 7px; }
+  .homeButton { width: 30px; padding: 0; font-size: 0; }
   .brandMark { width: 30px; height: 30px; }
   .logo { font-size: 9px; }
   .projectTitle { display: none; }

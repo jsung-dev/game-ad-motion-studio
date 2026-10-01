@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { Player, type PlayerRef } from "@remotion/player";
 import { createClient } from "@supabase/supabase-js";
 import {
@@ -2292,6 +2293,10 @@ export function VideoAdEditor() {
     <main className={styles.page}>
       <header className={styles.header}>
         <div className={styles.brand}>
+          <Link className={styles.homeButton} href="/" aria-label={"\uD648\uD398\uC774\uC9C0\uB85C \uB3CC\uC544\uAC00\uAE30"}>
+            <ChevronLeft size={15} aria-hidden="true" />
+            <span>{"\uD648"}</span>
+          </Link>
           <span className={styles.brandMark}><Film size={18} /></span>
           <span className={styles.logo}>AD MOTION LAB</span>
         </div>

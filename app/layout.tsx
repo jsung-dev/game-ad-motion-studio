@@ -4,28 +4,28 @@ import "./globals.css";
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#080b12",
+  themeColor: "#f2f0e8",
 };
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"),
   title: {
-    default: "게임 광고 영상 스튜디오",
-    template: "%s | 게임 광고 영상 스튜디오",
+    default: "ODD PLAY | 심리테스트와 미니게임",
+    template: "%s | ODD PLAY",
   },
-  description: "MP4에 텍스트와 PNG 카피 모션을 합성해 광고 영상을 제작합니다.",
+  description: "심리테스트, 연애, 밸런스 게임, 퀴즈와 미니게임을 한곳에서 즐겨보세요.",
   openGraph: {
-    title: "게임 광고 영상 스튜디오",
-    description: "영상 업로드부터 모션 카피 합성, MP4 출력까지 한 번에.",
+    title: "ODD PLAY | 심리테스트와 미니게임",
+    description: "짧지만 확실한 재미를 골라 즐기는 플레이 컬렉션.",
     type: "website",
     locale: "ko_KR",
-    siteName: "게임 광고 영상 스튜디오",
-    images: [{ url: "/opengraph-image", width: 1200, height: 630, alt: "게임 광고 영상 스튜디오" }],
+    siteName: "ODD PLAY",
+    images: [{ url: "/opengraph-image", width: 1200, height: 630, alt: "ODD PLAY" }],
   },
   twitter: {
     card: "summary_large_image",
-    title: "게임 광고 영상 스튜디오",
-    description: "MP4에 텍스트와 PNG 카피 모션을 합성해 광고 영상을 제작합니다.",
+    title: "ODD PLAY | 심리테스트와 미니게임",
+    description: "짧지만 확실한 재미를 골라 즐기는 플레이 컬렉션.",
     images: ["/opengraph-image"],
   },
 };

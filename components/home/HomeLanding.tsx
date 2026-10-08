@@ -1,89 +1,155 @@
-"use client";
-
-import type { CSSProperties } from "react";
-import { useMemo, useState } from "react";
-import { ArrowUpRight, BrainCircuit, Gamepad2, Heart, Menu, Scale, Sparkles, Timer, Trophy, Users, X } from "lucide-react";
-import { categories, getCategory, playContents } from "@/data/play-content";
-import type { CategoryIcon, PlayContent } from "@/types/play-content";
+import Link from "next/link";
+import {
+  CheckCircle2,
+  ChevronRight,
+  Film,
+  Layers3,
+  Sparkles,
+  UploadCloud,
+} from "lucide-react";
 import styles from "./HomeLanding.module.css";
 
-const categoryIcons = { mind: BrainCircuit, heart: Heart, balance: Scale, quiz: Trophy, game: Gamepad2 } satisfies Record<CategoryIcon, typeof BrainCircuit>;
-
-function formatParticipants(value: number) {
-  return value >= 10_000 ? `${(value / 10_000).toFixed(1)}만` : value.toLocaleString("ko-KR");
-}
-
-function Artwork({ content, compact = false }: { content: PlayContent; compact?: boolean }) {
-  const artworkStyle = { "--art-gradient": content.thumbnail_gradient, "--art-accent": content.thumbnail_accent } as CSSProperties;
-  return (
-    <div className={`${styles.artwork} ${compact ? styles.artworkCompact : ""}`} style={artworkStyle} aria-hidden="true">
-      <span className={`${styles.motif} ${styles[`motif_${content.thumbnail_motif}`]}`} />
-      <span className={styles.artCode}>{content.id.slice(-2)}</span>
-      <span className={styles.artLabel}>PLAY / {content.category_id.toUpperCase()}</span>
-    </div>
-  );
-}
+const workflow = [
+  {
+    icon: UploadCloud,
+    title: "\uC601\uC0C1 \uC785\uB825",
+    description: "MP4\uB97C \uC62C\uB9AC\uAC70\uB098 \uC791\uC5C5\uD560 \uCEF7\uC744 \uCD94\uAC00\uD569\uB2C8\uB2E4.",
+  },
+  {
+    icon: Sparkles,
+    title: "\uCEF7 \uC0DD\uC131",
+    description: "\uD504\uB86C\uD504\uD2B8\uC640 \uB808\uD37C\uB7F0\uC2A4\uB85C \uAC1C\uBCC4 \uCEF7\uC744 \uB9CC\uB4ED\uB2C8\uB2E4.",
+  },
+  {
+    icon: Layers3,
+    title: "\uCE74\uD53C \uD3B8\uC9D1",
+    description: "\uD14D\uC2A4\uD2B8\uC640 PNG \uC624\uBC84\uB808\uC774\uB97C \uD0C0\uC784\uB77C\uC778\uC5D0 \uBC30\uCE58\uD569\uB2C8\uB2E4.",
+  },
+  {
+    icon: Film,
+    title: "MP4 \uCD9C\uB825",
+    description: "\uC5F0\uACB0\uB41C \uCEF7\uACFC \uCE74\uD53C\uB97C \uD558\uB098\uC758 \uAD11\uACE0 \uC601\uC0C1\uC73C\uB85C \uB9CC\uB4ED\uB2C8\uB2E4.",
+  },
+] as const;
 
 export function HomeLanding() {
-  const [activeCategory, setActiveCategory] = useState("all");
-  const [menuOpen, setMenuOpen] = useState(false);
-  const visibleContents = useMemo(() => activeCategory === "all" ? playContents : playContents.filter((content) => content.category_id === activeCategory), [activeCategory]);
-  const featured = playContents.find((content) => content.is_featured) ?? playContents[0];
-
-  const chooseCategory = (categoryId: string) => {
-    setActiveCategory(categoryId);
-    setMenuOpen(false);
-    window.setTimeout(() => document.querySelector("#contents")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
-  };
-
   return (
     <main className={styles.page}>
-      <header className={styles.header}>
-        <a className={styles.brand} href="#top" aria-label="ODD PLAY 홈"><span className={styles.brandMark}>O</span><span>ODD<br />PLAY</span></a>
-        <nav className={styles.desktopNav} aria-label="주요 카테고리">{categories.map((category) => <button key={category.id} onClick={() => chooseCategory(category.id)} type="button">{category.name}</button>)}</nav>
-        <div className={styles.headerMeta}><span>5 CATEGORIES</span><i /><span>15 PLAYS</span></div>
-        <button className={styles.menuButton} onClick={() => setMenuOpen((open) => !open)} type="button" aria-label="메뉴 열기" aria-expanded={menuOpen}>{menuOpen ? <X /> : <Menu />}</button>
-      </header>
+      <div className={styles.shell}>
+        <header className={styles.header}>
+          <Link className={styles.brand} href="/" aria-label="AD MOTION LAB \uD648">
+            <span className={styles.brandMark}>
+              <Film size={16} aria-hidden="true" />
+            </span>
+            <span>AD MOTION LAB</span>
+          </Link>
+          <Link className={styles.headerAction} href="/video-ad">
+            {"\uC2A4\uD29C\uB514\uC624 \uC5F4\uAE30"}
+            <ChevronRight size={15} aria-hidden="true" />
+          </Link>
+        </header>
 
-      {menuOpen && <nav className={styles.mobileMenu} aria-label="모바일 카테고리">{categories.map((category, index) => <button key={category.id} onClick={() => chooseCategory(category.id)} type="button"><span>0{index + 1}</span>{category.name}<ArrowUpRight size={18} /></button>)}</nav>}
+        <section className={styles.hero}>
+          <div className={styles.copy}>
+            <p className={styles.eyebrow}>
+              <span className={styles.eyebrowDot} aria-hidden="true" />
+              AI GAME AD STUDIO
+            </p>
+            <h1>
+              {"\uAC8C\uC784 \uAD11\uACE0\uB97C"}
+              <br />
+              <em>{"\uCEF7 \uB2E8\uC704\uB85C"}</em> {"\uC644\uC131\uD558\uC138\uC694."}
+            </h1>
+            <p className={styles.description}>
+              {"\uC601\uC0C1, \uB808\uD37C\uB7F0\uC2A4, \uCE74\uD53C\uB97C \uD558\uB098\uC758 \uD0C0\uC784\uB77C\uC778\uC5D0\uC11C \uC5F0\uACB0\uD558\uACE0, \uBC14\uB85C \uAD11\uACE0 \uC601\uC0C1\uC73C\uB85C \uB9CC\uB4DC\uC138\uC694."}
+            </p>
+            <div className={styles.ctaRow}>
+              <Link className={styles.primaryCta} href="/video-ad">
+                {"\uC2A4\uD29C\uB514\uC624 \uC2DC\uC791\uD558\uAE30"}
+                <ChevronRight size={18} aria-hidden="true" />
+              </Link>
+              <a className={styles.secondaryCta} href="#workflow">
+                {"\uC791\uC5C5 \uBC29\uC2DD \uBCF4\uAE30"}
+              </a>
+            </div>
+            <p className={styles.note}>
+              <CheckCircle2 size={14} aria-hidden="true" />
+              {"\uB85C\uADF8\uC778 \uC5C6\uC774 \uBC14\uB85C \uC791\uC5C5\uC744 \uC2DC\uC791\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4."}
+            </p>
+          </div>
 
-      <section className={styles.hero} id="top">
-        <div className={styles.heroCopy}>
-          <p className={styles.kicker}><Sparkles size={15} /> 오늘 뭐 하고 놀지?</p>
-          <h1><span>지루한 틈을</span><br />재밌게 <em>뒤집어.</em></h1>
-          <p className={styles.heroDescription}>나를 발견하는 테스트부터 친구와 붙어보는 게임까지.<br className={styles.desktopBreak} /> 짧지만 확실한 재미를 골라보세요.</p>
-          <button className={styles.heroCta} onClick={() => chooseCategory("all")} type="button">지금 둘러보기 <span><ArrowUpRight size={19} /></span></button>
-        </div>
-        <div className={styles.heroFeature}>
-          <div className={styles.featureTape}>TODAY&apos;S PICK · TODAY&apos;S PICK ·</div>
-          <Artwork content={featured} compact />
-          <div className={styles.featureInfo}><span>{getCategory(featured.category_id)?.name}</span><strong>{featured.title}</strong><div><Users size={14} /> {formatParticipants(featured.participant_count)}명 참여 <i /> <Timer size={14} /> {featured.duration_minutes}분</div></div>
-        </div>
-      </section>
+          <div className={styles.studioPreview} aria-label="\uC601\uC0C1 \uC81C\uC791 \uC2A4\uD29C\uB514\uC624 \uBBF8\uB9AC\uBCF4\uAE30">
+            <div className={styles.previewBar}>
+              <div className={styles.previewDots} aria-hidden="true"><span /><span /><span /></div>
+              <span>GAME AD STUDIO</span>
+            </div>
+            <div className={styles.previewBody}>
+              <aside className={styles.toolRail}>
+                <strong>{"\uC5D0\uC14B"}</strong>
+                <span><UploadCloud size={12} aria-hidden="true" /> MP4</span>
+                <span><Sparkles size={12} aria-hidden="true" /> AI Cut</span>
+                <span><Layers3 size={12} aria-hidden="true" /> Copy</span>
+              </aside>
+              <div className={styles.previewCanvas}>
+                <div className={styles.showcaseStage}>
+                  <video
+                    aria-label="\uAC8C\uC784 \uAD11\uACE0 \uC601\uC0C1 \uC2DC\uC548"
+                    autoPlay
+                    className={styles.showcaseVideo}
+                    loop
+                    muted
+                    playsInline
+                    poster="/showcase/game-ad-showcase-poster.jpg"
+                    preload="metadata"
+                  >
+                    <source src="/showcase/game-ad-showcase.mp4" type="video/mp4" />
+                  </video>
+                  <div className={styles.showcaseOverlay} aria-hidden="true" />
+                  <div className={styles.showcaseTop} aria-hidden="true">
+                    <span><i className={styles.liveDot} /> FINAL CUT</span>
+                    <span>00:16 / 30 FPS</span>
+                  </div>
+                  <div className={styles.showcaseBottom} aria-hidden="true">
+                    <strong>GAME AD<br />SHOWCASE</strong>
+                    <span>Motion / Copy / CTA</span>
+                  </div>
+                </div>
+                <div className={styles.timeline} aria-hidden="true">
+                  <div className={styles.timelineHeader}><span>AD SEQUENCE</span><span>00:16</span></div>
+                  <div className={styles.timelineRow}><span className={styles.trackLabel}>V1</span><div className={styles.track}><span className={styles.videoTrack} /></div></div>
+                  <div className={styles.timelineRow}><span className={styles.trackLabel}>T1</span><div className={styles.track}><span className={styles.copyTrack} /></div></div>
+                  <div className={styles.timelineRow}><span className={styles.trackLabel}>FX</span><div className={styles.track}><span className={styles.effectTrack} /></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
 
-      <section className={styles.categoriesSection} aria-labelledby="category-title">
-        <div className={styles.sectionTitle}><span>01 / CHOOSE A MOOD</span><h2 id="category-title">오늘의 플레이</h2><p>기분에 맞는 카테고리를 골라보세요.</p></div>
-        <div className={styles.categoryGrid}>
-          {categories.map((category, index) => {
-            const Icon = categoryIcons[category.icon];
-            return <button className={styles.categoryCard} key={category.id} onClick={() => chooseCategory(category.id)} type="button"><span className={styles.categoryNumber}>0{index + 1}</span><span className={styles.categoryIcon}><Icon size={25} strokeWidth={1.8} /></span><strong>{category.name}</strong><small>{category.description}</small><ArrowUpRight className={styles.categoryArrow} size={20} /></button>;
-          })}
-        </div>
-      </section>
+        <section className={styles.workflow} id="workflow">
+          <div className={styles.sectionHeading}>
+            <p>ONE WORKFLOW</p>
+            <h2>{"\uD544\uC694\uD55C \uC81C\uC791 \uACFC\uC815\uB9CC \uAC04\uACB0\uD558\uAC8C."}</h2>
+          </div>
+          <div className={styles.steps}>
+            {workflow.map((step, index) => {
+              const Icon = step.icon;
+              return (
+                <article className={styles.step} key={step.title}>
+                  <span className={styles.stepIcon}><Icon size={17} aria-hidden="true" /></span>
+                  <span className={styles.stepNumber}>0{index + 1}</span>
+                  <h3>{step.title}</h3>
+                  <p>{step.description}</p>
+                </article>
+              );
+            })}
+          </div>
+        </section>
 
-      <section className={styles.contentsSection} id="contents" aria-labelledby="contents-title">
-        <div className={styles.contentsHeader}><div className={styles.sectionTitle}><span>02 / PICK YOUR PLAY</span><h2 id="contents-title">{activeCategory === "all" ? "전체 콘텐츠" : getCategory(activeCategory)?.name}</h2></div><span className={styles.resultCount}>{String(visibleContents.length).padStart(2, "0")} RESULTS</span></div>
-        <div className={styles.filterBar} aria-label="콘텐츠 필터">
-          <button className={activeCategory === "all" ? styles.activeFilter : ""} onClick={() => setActiveCategory("all")} type="button">전체</button>
-          {categories.map((category) => <button className={activeCategory === category.id ? styles.activeFilter : ""} key={category.id} onClick={() => setActiveCategory(category.id)} type="button">{category.name}</button>)}
-        </div>
-        <div className={styles.contentGrid}>
-          {visibleContents.map((content) => <article className={styles.contentCard} key={content.id}><Artwork content={content} /><div className={styles.cardBody}><div className={styles.cardCategory}>{getCategory(content.category_id)?.name}<span>준비 중</span></div><h3>{content.title}</h3><p>{content.summary}</p><div className={styles.cardMeta}><span><Users size={14} /> {formatParticipants(content.participant_count)}명</span><span><Timer size={14} /> 약 {content.duration_minutes}분</span></div></div></article>)}
-        </div>
-      </section>
-
-      <footer className={styles.footer}><div><span className={styles.brandMark}>O</span><strong>ODD PLAY</strong></div><p>심심한 순간을 위한 작은 놀이터.<br />새로운 플레이가 계속 추가됩니다.</p><span>© 2026 ODD PLAY</span></footer>
-      <nav className={styles.bottomNav} aria-label="하단 메뉴"><button className={activeCategory === "all" ? styles.bottomActive : ""} onClick={() => chooseCategory("all")} type="button"><Sparkles /><span>홈</span></button><button onClick={() => chooseCategory("psychology")} type="button"><BrainCircuit /><span>테스트</span></button><button onClick={() => chooseCategory("minigame")} type="button"><Gamepad2 /><span>게임</span></button></nav>
+        <footer className={styles.footer}>
+          <span>AD MOTION LAB</span>
+          <Link href="/video-ad">{"\uC2A4\uD29C\uB514\uC624\uB85C \uC774\uB3D9"} <ChevronRight size={13} aria-hidden="true" /></Link>
+        </footer>
+      </div>
     </main>
   );
 }
